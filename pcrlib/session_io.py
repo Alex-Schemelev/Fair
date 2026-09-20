@@ -58,7 +58,7 @@ def slim_session_payload(payload):
     return out
 
 
-def cleanup_old_runs(runs_dir, max_age_days=30, keep_latest=20):
+def cleanup_old_runs(runs_dir, max_age_days=30, keep_latest=5):
     """
     Удалить каталоги прогонов старше max_age_days (по mtime),
     но всегда сохранить keep_latest самых свежих по mtime.
