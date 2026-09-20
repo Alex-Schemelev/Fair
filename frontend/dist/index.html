@@ -1,0 +1,1005 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <title>In silico PCR UI</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#0f172a; color:#e5e7eb; }
+      .app { padding:24px; }
+      .app-header h1 { margin:0; font-size:28px; }
+      .app-header p { margin:4px 0 0; color:#9ca3af; }
+      .tabs { display:flex; gap:8px; margin:16px 0; }
+      .tab { padding:8px 16px; border-radius:999px; border:1px solid #374151; background:transparent; color:#e5e7eb; cursor:pointer; }
+      .tab.active { background:#2563eb; border-color:#2563eb; }
+      .panel { display:flex; flex-direction:column; gap:16px; }
+      .card { background:#111827; border-radius:12px; padding:16px; border:1px solid #1f2937; }
+      .field { margin-bottom:12px; }
+      .field label { display:block; margin-bottom:4px; font-size:13px; }
+      .field.inline { display:flex; align-items:center; justify-content:space-between; }
+      input[type="text"], input[type="number"], input[type="file"] { background:#020617; border:1px solid #374151; border-radius:6px; padding:6px 8px; color:#e5e7eb; width:100%; box-sizing:border-box; }
+      .primer-row { display:flex; gap:8px; margin-bottom:8px; }
+      .grid-2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; align-items:end; }
+      .grid-2 > .field { margin-bottom:0; }
+      .primer-name { flex:0 0 180px; }
+      .primer-seq { flex:1; }
+      .btn-primary { background:#2563eb; border:none; border-radius:999px; padding:10px 20px; color:white; cursor:pointer; }
+      .btn-secondary { background:#111827; border-radius:999px; border:1px solid #4b5563; padding:6px 12px; color:#e5e7eb; cursor:pointer; }
+      .actions { display:flex; justify-content:flex-end; }
+      .switch { position:relative; display:inline-block; width:44px; height:24px; }
+      .switch input { opacity:0; width:0; height:0; }
+      .slider { position:absolute; cursor:pointer; inset:0; background-color:#374151; transition:.2s; border-radius:999px; }
+      .slider:before { position:absolute; content:""; height:18px; width:18px; left:3px; bottom:3px; background-color:white; transition:.2s; border-radius:50%; }
+      input:checked + .slider { background-color:#22c55e; }
+      input:checked + .slider:before { transform:translateX(18px); }
+      .dimer-block { margin-bottom:16px; }
+      .dimer-header { font-weight:600; margin-bottom:4px; }
+      .dimer-text { background:#020617; border-radius:8px; padding:8px; font-family:"JetBrains Mono", monospace; font-size:13px; white-space:pre; overflow-x:auto; }
+      .bindings-table { width:100%; border-collapse:collapse; font-size:13px; }
+      .bindings-table th, .bindings-table td { border:1px solid #1f2937; padding:4px 6px; }
+      .bindings-table th { background:#020617; text-align:left; }
+      .status-ok { background-color: rgba(22,163,74,0.25); }
+      .status-bad { background-color: rgba(220,38,38,0.3); }
+      .cons-grid { border-collapse:collapse; font-family:"JetBrains Mono", monospace; font-size:13px; }
+      .cons-grid td { border:1px solid #1f2937; padding:4px 6px; text-align:center; min-width:18px; }
+      .cons-grid .row-label { text-align:left; min-width:120px; background:#020617; }
+      .annomap-wrap { position:relative; color:#1e293b; }
+      .annomap-controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:10px; color:#334155; }
+      .annomap-controls label { font-size:13px; display:flex; gap:6px; align-items:center; }
+      .annomap-legend { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px; }
+      .annomap-legend-item { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#475569; }
+      .annomap-swatch { width:12px; height:12px; border-radius:3px; display:inline-block; border:1px solid #94a3b8; }
+      .annomap-scroll { overflow:auto; max-height:70vh; border:1px solid #cbd5e1; border-radius:8px; background:#f8fafc; }
+      .annomap-svg { display:block; min-width:100%; background:#ffffff; }
+      .annomap-tooltip { position:fixed; z-index:50; background:#ffffff; border:1px solid #cbd5e1; color:#0f172a; border-radius:8px; padding:8px 10px; font-size:12px; max-width:320px; pointer-events:none; box-shadow:0 8px 24px rgba(15,23,42,0.15); }
+      .annomap-rank { margin-top:12px; border:1px solid #cbd5e1; border-radius:8px; background:#ffffff; max-height:280px; overflow:auto; }
+      .annomap-rank table { width:100%; border-collapse:collapse; font-size:12px; }
+      .annomap-rank th, .annomap-rank td { border-bottom:1px solid #e2e8f0; padding:6px 8px; text-align:left; color:#1e293b; }
+      .annomap-rank th { background:#f1f5f9; position:sticky; top:0; }
+      .annomap-rank tr.active { background:#dbeafe; }
+      .annomap-rank tr:hover { background:#f1f5f9; cursor:pointer; }
+      .annomap-hint { color:#64748b; font-size:12px; margin-top:8px; }
+      .annomap-modal-backdrop { position:fixed; inset:0; background:rgba(15,23,42,0.45); z-index:80; display:flex; align-items:center; justify-content:center; padding:16px; }
+      .annomap-modal { background:#fff; color:#0f172a; border-radius:12px; width:min(860px,96vw); max-height:90vh; overflow:auto; border:1px solid #cbd5e1; box-shadow:0 20px 50px rgba(0,0,0,0.25); padding:16px; }
+      .annomap-modal h3 { margin:0 0 12px; }
+      .annomap-modal .field { margin-bottom:10px; }
+      .annomap-modal label { display:block; font-size:13px; margin-bottom:4px; color:#334155; }
+      .annomap-modal input[type="text"], .annomap-modal textarea, .annomap-modal select { width:100%; box-sizing:border-box; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; padding:6px 8px; color:#0f172a; }
+      .annomap-modal textarea { min-height:80px; resize:vertical; }
+      .annomap-modal-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:12px; }
+      .annomap-round-box { border:1px solid #e2e8f0; border-radius:8px; padding:8px; margin-bottom:8px; background:#f8fafc; }
+      .annomap-scheme-list { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0; }
+      .annomap-scheme-chip { font-size:12px; padding:4px 8px; border-radius:999px; background:#e0f2fe; color:#075985; border:1px solid #7dd3fc; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="/annotation_map.js?v=11"></script>
+    <script>
+      const e = React.createElement;
+
+      function App() {
+        const [primers, setPrimers] = React.useState([{ name: "", sequence: "" }]);
+        const [referenceFile, setReferenceFile] = React.useState(null);
+        const [primersTableFile, setPrimersTableFile] = React.useState(null);
+        const [conservationTableFile, setConservationTableFile] = React.useState(null);
+        const [blastEnabled, setBlastEnabled] = React.useState(true);
+        const [bindings, setBindings] = React.useState([]);
+        const [selectedPrimer, setSelectedPrimer] = React.useState(null);
+        const [dimersMatrix, setDimersMatrix] = React.useState([]);
+        const [homoQc, setHomoQc] = React.useState([]);
+        const [blastBindings, setBlastBindings] = React.useState([]);
+        const [blastHumanSummary, setBlastHumanSummary] = React.useState([]);
+        const [consensusQc, setConsensusQc] = React.useState([]);
+        const [params, setParams] = React.useState({
+          MIN_AMPLICON: 100,
+          MAX_AMPLICON: 10000,
+          MAX_DEGENERATE_VARIANTS: 50,
+          MAX_TM_DIFF: "",
+          MAX_3PRIME_MATCHES: 3,
+          ANNEALING_TEMP: 60.0,
+          MAX_HUMAN_DELTA: 1500,
+          MAX_MISMATCHES_TOTAL: 0,
+          MAX_MISMATCHES_3PRIME: 0,
+          THREE_PRIME_WINDOW: 5,
+          MIN_S_INDEX_AVG: "",
+          MAX_INDELS_TOTAL: "",
+          MAX_INDELS_3PRIME: ""
+        });
+        const [filters, setFilters] = React.useState({
+          filter_dimer_above_ta: false,
+          filter_3prime: false
+        });
+        const [runArchiveFile, setRunArchiveFile] = React.useState(null);
+        const [activeTab, setActiveTab] = React.useState("form");
+        const [dimers, setDimers] = React.useState([]);
+        const [products, setProducts] = React.useState([]);
+        const [runId, setRunId] = React.useState(null);
+        const [availableFiles, setAvailableFiles] = React.useState([]);
+        const [conservation, setConservation] = React.useState([]);
+        const [annotationMap, setAnnotationMap] = React.useState({ length: 0, features: [] });
+        const [pcrSchemes, setPcrSchemes] = React.useState([]);
+        const [laneMaps, setLaneMaps] = React.useState({ ref: {}, primer: {}, product: {} });
+        const [loading, setLoading] = React.useState(false);
+        const [filterInfo, setFilterInfo] = React.useState(null);
+
+        const updatePrimer = (index, field, value) => {
+          setPrimers(prev => {
+            const next = prev.slice();
+            next[index] = { ...next[index], [field]: value };
+            return next;
+          });
+        };
+
+        const addPrimerRow = () => setPrimers(prev => prev.concat({ name: "", sequence: "" }));
+        const removePrimerRow = (index) => setPrimers(prev => prev.filter((_, i) => i !== index));
+
+        const updateParam = (key, value) => {
+          setParams(prev => ({ ...prev, [key]: value }));
+        };
+        const updateFilter = (key, value) => {
+          setFilters(prev => ({ ...prev, [key]: value }));
+        };
+
+        const applySessionData = (data) => {
+          setDimers(data.dimers || []);
+          setBindings(data.bindings || []);
+          setSelectedPrimer(null);
+          setDimersMatrix(data.dimers_matrix || []);
+          setProducts(data.products || []);
+          setConsensusQc(data.consensus_qc || []);
+          setHomoQc(data.homo_qc || []);
+          setBlastBindings(data.blast_bindings || []);
+          setBlastHumanSummary(data.blast_human_summary || []);
+          setRunId(data.run_id || null);
+          setAvailableFiles(data.available_files || []);
+          setConservation(data.conservation || []);
+          setAnnotationMap(data.annotation_map || { length: 0, features: [] });
+          setPcrSchemes(data.pcr_schemes || []);
+          setLaneMaps(data.lane_maps || { ref: {}, primer: {}, product: {} });
+          if (data.products_before_filter !== undefined) {
+            setFilterInfo({
+              before: data.products_before_filter,
+              after: data.products_after_filter
+            });
+          } else {
+            setFilterInfo(null);
+          }
+          if (data.params) {
+            setParams(prev => ({ ...prev, ...data.params }));
+          }
+          if (data.filters_applied) {
+            setFilters(prev => ({
+              ...prev,
+              filter_dimer_above_ta: !!data.filters_applied.filter_dimer_above_ta,
+              filter_3prime: !!data.filters_applied.filter_3prime
+            }));
+          }
+        };
+
+        const saveRunArchive = async () => {
+          if (!runId) {
+            alert("Нет активного прогона");
+            return;
+          }
+          try {
+            await fetch(`/api/run/${runId}/update_session`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ pcr_schemes: pcrSchemes, lane_maps: laneMaps })
+            });
+          } catch (err) {
+            console.error(err);
+          }
+          window.location.href = `/api/export/${runId}`;
+        };
+
+        React.useEffect(() => {
+          if (!runId) return undefined;
+          const timer = setTimeout(() => {
+            fetch(`/api/run/${runId}/update_session`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ lane_maps: laneMaps, pcr_schemes: pcrSchemes })
+            }).catch(() => {});
+          }, 600);
+          return () => clearTimeout(timer);
+        }, [laneMaps, pcrSchemes, runId]);
+
+        const classifyRunFile = (fn) => {
+          const name = String(fn || "");
+          if (/dimer|homodimer|primer3_dimer/i.test(name)) return "dimers";
+          if (/^PCR_results/i.test(name)) return "products";
+          if (/annotation_map\.json$/i.test(name) || /^annotated_/i.test(name)) return "map";
+          if (/consensus_qc/i.test(name)) return "consQc";
+          if (/binding_sites/i.test(name)) return "bindings";
+          if (/blast_ref/i.test(name)) return "blast";
+          if (/human_blast/i.test(name)) return "blastHuman";
+          if (/S_results_table|conservation\.tsv/i.test(name)) return "cons";
+          if (/session\.json$/i.test(name)) return "form";
+          if (/pipeline\.log$/i.test(name)) return "form";
+          if (/primers_table|uploaded_primers|^primers\.csv$/i.test(name)) return "form";
+          if (/\.(gb|gbk|fa|fasta)$/i.test(name)) return "form";
+          return "form";
+        };
+
+        const filesForTab = (tab) =>
+          (availableFiles || []).filter((fn) => classifyRunFile(fn) === tab);
+
+        const renderTabFileLinks = (tab) => {
+          const files = filesForTab(tab);
+          if (!runId || !files.length) return null;
+          return e("div", { style: { marginTop: "10px" } },
+            e("div", { style: { color: "#9ca3af", fontSize: "13px", marginBottom: "6px" } },
+              "Файлы этой вкладки:"
+            ),
+            files.map((fn) =>
+              e("div", { key: fn, style: { marginBottom: "6px" } },
+                e("a", {
+                  href: `/api/download/${runId}/${encodeURIComponent(fn)}`,
+                  style: { color: "#93c5fd" }
+                }, "Скачать: " + fn)
+              )
+            )
+          );
+        };
+
+        const downloadProductsCsv = () => {
+          if (!products || !products.length) {
+            alert("Нет продуктов для сохранения.");
+            return;
+          }
+          const headers = [
+            "Forward_primer",
+            "Reverse_primer",
+            "Amplicon_start",
+            "Amplicon_end",
+            "Product_size",
+            "Tm_F",
+            "Tm_R",
+            "Tm_diff",
+            "Heterodimer_TM",
+            "Heterodimer_dG",
+            "3prime_matches",
+            "Forward_sequence",
+            "Reverse_sequence",
+            "human_status",
+            "Hum_BLAST"
+          ];
+          const lines = [];
+          lines.push(headers.join(";"));
+          products.forEach(row => {
+            const values = headers.map(h => (row[h] !== undefined && row[h] !== null) ? String(row[h]) : "");
+            // экранируем ; и перевод строки в значениях
+            lines.push(values.map(v =>
+              v.replace(/;/g, ",").replace(/[\r\n]+/g, " ")
+            ).join(";"));
+          });
+          const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "PCR_results_primer3py.csv";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        };
+
+        const handleRun = async () => {
+          if (!referenceFile) { alert("Загрузите референсный файл"); return; }
+          const nonEmpty = primers.filter(p => p.name && p.sequence);
+          if (!primersTableFile && !nonEmpty.length) {
+            alert("Добавьте хотя бы один праймер или загрузите таблицу праймеров");
+            return;
+          }
+          setLoading(true);
+          try {
+            const formData = new FormData();
+            formData.append("reference", referenceFile);
+            if (primersTableFile) {
+              formData.append("primers_table", primersTableFile);
+            }
+            if (conservationTableFile) {
+              formData.append("conservation_table", conservationTableFile);
+            }
+            formData.append("payload", JSON.stringify({
+              primers: nonEmpty,
+              blast_enabled: blastEnabled,
+              params: params,
+              filters: {
+                min_s_index_avg: params.MIN_S_INDEX_AVG,
+                max_tm_diff: params.MAX_TM_DIFF,
+                max_indels_total: params.MAX_INDELS_TOTAL,
+                max_indels_3prime: params.MAX_INDELS_3PRIME,
+                filter_dimer_above_ta: filters.filter_dimer_above_ta,
+                filter_3prime: filters.filter_3prime
+              }
+            }));
+            const res = await fetch("/api/run", { method:"POST", body: formData });
+            const data = await res.json();
+            if (data.error) {
+              alert(data.error);
+            } else {
+              applySessionData(data);
+              setActiveTab("dimers");
+            }
+          } catch (err) {
+            console.error(err);
+            alert("Ошибка при запросе к серверу");
+          } finally {
+            setLoading(false);
+          }
+        };
+
+        const handleLoadRun = async () => {
+          if (!runArchiveFile) {
+            alert("Выберите zip-архив сохранённого прогона");
+            return;
+          }
+          setLoading(true);
+          try {
+            const formData = new FormData();
+            formData.append("run_archive", runArchiveFile);
+            const res = await fetch("/api/load_run", { method: "POST", body: formData });
+            const data = await res.json();
+            if (data.error) {
+              alert(data.error);
+            } else {
+              applySessionData(data);
+              setActiveTab("products");
+            }
+          } catch (err) {
+            console.error(err);
+            alert("Ошибка при загрузке прогона");
+          } finally {
+            setLoading(false);
+          }
+        };
+
+        return (
+          e("div", { className:"app" },
+            e("header", { className:"app-header" },
+              e("h1", null, "In silico PCR"),
+              e("p", null, "Веб‑панель для запуска и анализа"),
+            ),
+            e("div", { className:"tabs" },
+              e("button", { className: activeTab==="form"?"tab active":"tab", onClick:()=>setActiveTab("form") }, "Настройки и запуск"),
+              e("button", { className: activeTab==="dimers"?"tab active":"tab", onClick:()=>setActiveTab("dimers") }, "Димеры"),
+              e("button", { className: activeTab==="products"?"tab active":"tab", onClick:()=>setActiveTab("products") }, "Продукты"),
+              e("button", { className: activeTab==="consQc"?"tab active":"tab", onClick:()=>setActiveTab("consQc") }, "QC по консенсусу"),
+              e("button", { className: activeTab==="bindings"?"tab active":"tab", onClick:()=>setActiveTab("bindings") }, "Посадки праймеров"),
+              e("button", { className: activeTab==="blast"?"tab active":"tab", onClick:()=>setActiveTab("blast") }, "BLAST‑по референсу"),
+              e("button", { className: activeTab==="blastHuman"?"tab active":"tab", onClick:()=>setActiveTab("blastHuman") }, "BLAST‑по человеку"),
+              e("button", { className: activeTab==="cons"?"tab active":"tab", onClick:()=>setActiveTab("cons") }, "Консервативность"),
+              e("button", { className: activeTab==="map"?"tab active":"tab", onClick:()=>setActiveTab("map") }, "Визуализация продуктов"),
+            ),
+            runId && e("div", {
+              className: "actions",
+              style: { justifyContent: "flex-start", marginBottom: "12px", gap: "8px", flexWrap: "wrap", alignItems: "center" }
+            },
+              e("button", {
+                type: "button",
+                className: "btn-secondary",
+                onClick: saveRunArchive
+              }, "Сохранить прогон (zip)"),
+              filterInfo && e("span", { style: { color: "#9ca3af", fontSize: "13px" } },
+                "Продуктов до фильтров: " + String(filterInfo.before) + ", после: " + String(filterInfo.after)
+              )
+            ),
+            activeTab==="form" && e("section", { className:"panel" },
+              e("div", { className:"card" },
+                e("h2", null, "Входные данные"),
+                e("div", { className:"field" },
+                  e("label", null, "Референс (FASTA / GenBank)"),
+                  e("input", {
+                    type:"file",
+                    accept:".fa,.fasta,.gb,.gbk,.txt",
+                    onChange: ev => setReferenceFile(ev.target.files && ev.target.files[0])
+                  })
+                ),
+                e("div", { className:"field" },
+                  e("label", null, "Таблица праймеров (первая колонка — имя, вторая — последовательность; разделитель ; или табуляция)"),
+                  e("input", {
+                    type:"file",
+                    accept:".txt,.csv,.tsv",
+                    onChange: ev => setPrimersTableFile(ev.target.files && ev.target.files[0])
+                  })
+                ),
+                e("div", { className:"field" },
+                  e("label", null, "Таблица консервативности (TSV/TXT: столбцы Coordinates, S_index, A, C, G, T, -; Coordinates — 1-based, вставки как 7+1; разделитель таб)"),
+                  e("input", {
+                    type:"file",
+                    accept:".txt,.tsv,.csv",
+                    onChange: ev => setConservationTableFile(ev.target.files && ev.target.files[0])
+                  })
+                ),
+                e("div", { className:"field inline" },
+                  e("label", null, "Проверка специфичности (BLAST)"),
+                  e("label", { className:"switch" },
+                    e("input", {
+                      type:"checkbox",
+                      checked: blastEnabled,
+                      onChange: ev => setBlastEnabled(ev.target.checked)
+                    }),
+                    e("span", { className:"slider" })
+                  )
+                ),
+                e("div", { className:"field" },
+                  e("label", null, "Загрузить сохранённый прогон (zip)"),
+                  e("input", {
+                    type:"file",
+                    accept:".zip",
+                    onChange: ev => setRunArchiveFile(ev.target.files && ev.target.files[0])
+                  }),
+                  e("div", { className:"actions", style:{ marginTop:"8px", justifyContent:"flex-start" } },
+                    e("button", {
+                      type:"button",
+                      className:"btn-secondary",
+                      disabled: loading,
+                      onClick: handleLoadRun
+                    }, loading ? "Загрузка..." : "Распаковать и открыть")
+                  )
+                )
+              ),
+              e("div", { className:"card" },
+                e("h2", null, "Параметры алгоритма"),
+                e("div", { className:"grid-2" },
+                  e("div", { className:"field" },
+                    e("label", null, "MIN_AMPLICON"),
+                    e("input", {
+                      type:"number",
+                      value:params.MIN_AMPLICON,
+                      onChange: ev => updateParam("MIN_AMPLICON", Number(ev.target.value)||0)
+                    })
+                  ),
+                  e("div", { className:"field" },
+                    e("label", null, "MAX_AMPLICON"),
+                    e("input", {
+                      type:"number",
+                      value:params.MAX_AMPLICON,
+                      onChange: ev => updateParam("MAX_AMPLICON", Number(ev.target.value)||0)
+                    })
+                  ),
+                  e("div", { className:"field" },
+                    e("label", null, "MAX_DEGENERATE_VARIANTS"),
+                    e("input", {
+                      type:"number",
+                      value:params.MAX_DEGENERATE_VARIANTS,
+                      onChange: ev => updateParam("MAX_DEGENERATE_VARIANTS", Number(ev.target.value)||0)
+                    })
+                  ),
+                  e("div", { className:"field" },
+                    e("label", null, "MAX_TM_DIFF (пусто = без фильтра)"),
+                    e("input", {
+                      type:"number",
+                      step:"0.1",
+                      placeholder:"без фильтра",
+                      value: params.MAX_TM_DIFF === "" || params.MAX_TM_DIFF === null || params.MAX_TM_DIFF === undefined ? "" : params.MAX_TM_DIFF,
+                      onChange: ev => updateParam("MAX_TM_DIFF", ev.target.value === "" ? "" : Number(ev.target.value))
+                    })
+                  ),
+                  e("div", { className:"field" },
+                    e("label", null, "MIN_S_INDEX_AVG (пусто = без фильтра)"),
+                    e("input", {
+                      type:"number",
+                      step:"0.01",
+                      placeholder:"без фильтра",
+                      value: params.MIN_S_INDEX_AVG === "" || params.MIN_S_INDEX_AVG === null || params.MIN_S_INDEX_AVG === undefined ? "" : params.MIN_S_INDEX_AVG,
+                      onChange: ev => updateParam("MIN_S_INDEX_AVG", ev.target.value === "" ? "" : Number(ev.target.value))
+                    })
+                  ),
+                  e("div", { className:"field" },
+                    e("label", null, "MAX_INDELS_TOTAL (пусто = без фильтра)"),
+                    e("input", {
+                      type:"number",
+                      placeholder:"без фильтра",
+                      value: params.MAX_INDELS_TOTAL === "" || params.MAX_INDELS_TOTAL === null || params.MAX_INDELS_TOTAL === undefined ? "" : params.MAX_INDELS_TOTAL,
+                      onChange: ev => updateParam("MAX_INDELS_TOTAL", ev.target.value === "" ? "" : Number(ev.target.value))
+                    })
+                  ),
+                  e("div", { className:"field" },
+                    e("label", null, "MAX_INDELS_3PRIME (пусто = без фильтра)"),
+                    e("input", {
+                      type:"number",
+                      placeholder:"без фильтра",
+                      value: params.MAX_INDELS_3PRIME === "" || params.MAX_INDELS_3PRIME === null || params.MAX_INDELS_3PRIME === undefined ? "" : params.MAX_INDELS_3PRIME,
+                      onChange: ev => updateParam("MAX_INDELS_3PRIME", ev.target.value === "" ? "" : Number(ev.target.value))
+                    })
+                  ),
+                  e("div", { className:"field" },
+                    e("label", null, "MAX_3PRIME_MATCHES"),
+                    e("input", {
+                      type:"number",
+                      value:params.MAX_3PRIME_MATCHES,
+                      onChange: ev => updateParam("MAX_3PRIME_MATCHES", Number(ev.target.value)||0)
+                    })
+                  ),
+                  e("div", { className:"field" },
+                    e("label", null, "ANNEALING_TEMP (°C)"),
+                    e("input", {
+                      type:"number",
+                      step:"0.1",
+                      value:params.ANNEALING_TEMP,
+                      onChange: ev => updateParam("ANNEALING_TEMP", Number(ev.target.value)||0)
+                    })
+                  ),
+                  e("div", { className:"field" },
+                    e("label", null, "MAX_HUMAN_DELTA"),
+                    e("input", {
+                      type:"number",
+                      value:params.MAX_HUMAN_DELTA,
+                      onChange: ev => updateParam("MAX_HUMAN_DELTA", Number(ev.target.value)||0)
+                    })
+                  ),
+                  e("div", { className:"field" },
+                    e("label", null, "MAX_MISMATCHES_TOTAL"),
+                    e("input", {
+                      type:"number",
+                      value:params.MAX_MISMATCHES_TOTAL,
+                      onChange: ev => updateParam("MAX_MISMATCHES_TOTAL", Number(ev.target.value)||0)
+                    })
+                  ),
+                  e("div", { className:"field" },
+                    e("label", null, "MAX_MISMATCHES_3PRIME"),
+                    e("input", {
+                      type:"number",
+                      value:params.MAX_MISMATCHES_3PRIME,
+                      onChange: ev => updateParam("MAX_MISMATCHES_3PRIME", Number(ev.target.value)||0)
+                    })
+                  ),
+                  e("div", { className:"field" },
+                    e("label", null, "THREE_PRIME_WINDOW"),
+                    e("input", {
+                      type:"number",
+                      value:params.THREE_PRIME_WINDOW,
+                      onChange: ev => updateParam("THREE_PRIME_WINDOW", Number(ev.target.value)||0)
+                    })
+                  )
+                )
+              ),
+              e("div", { className:"card" },
+                e("h2", null, "Фильтры продуктов"),
+                e("p", { style:{ color:"#9ca3af", marginTop:0, fontSize:"13px" } },
+                  "Числовые пороги MAX_TM_DIFF / MIN_S_INDEX_AVG / MAX_INDELS_* применяются только если поля не пустые. Галочки включают дополнительные отсевы."
+                ),
+                e("div", { className:"field inline" },
+                  e("label", null, "Отсеивать при гомо/гетеродимерах с Tm > ANNEALING_TEMP"),
+                  e("label", { className:"switch" },
+                    e("input", {
+                      type:"checkbox",
+                      checked: filters.filter_dimer_above_ta,
+                      onChange: ev => updateFilter("filter_dimer_above_ta", ev.target.checked)
+                    }),
+                    e("span", { className:"slider" })
+                  )
+                ),
+                e("div", { className:"field inline" },
+                  e("label", null, "Отсеивать по 3'-комплементарности (> MAX_3PRIME_MATCHES)"),
+                  e("label", { className:"switch" },
+                    e("input", {
+                      type:"checkbox",
+                      checked: filters.filter_3prime,
+                      onChange: ev => updateFilter("filter_3prime", ev.target.checked)
+                    }),
+                    e("span", { className:"slider" })
+                  )
+                )
+              ),
+              e("div", { className:"card" },
+                e("h2", null, "Праймеры"),
+                e("p", { className:"hint" },
+                  "Таблица только из двух полей: ",
+                  e("strong", null, "Название"),
+                  " и ",
+                  e("strong", null, "Последовательность (5'→3')"),
+                  ". Длину и направление скрипт определит по совпадениям."
+                ),
+                primers.map((p, i) =>
+                  e("div", { className:"primer-row", key:i },
+                    e("input", {
+                      className:"primer-name",
+                      placeholder:"Название",
+                      value:p.name,
+                      onChange: ev => updatePrimer(i, "name", ev.target.value)
+                    }),
+                    e("input", {
+                      className:"primer-seq",
+                      placeholder:"Последовательность 5'→3'",
+                      value:p.sequence,
+                      onChange: ev => updatePrimer(i, "sequence", ev.target.value.toUpperCase())
+                    }),
+                    primers.length>1 && e("button", {
+                      type:"button",
+                      className:"btn-secondary",
+                      onClick:()=>removePrimerRow(i)
+                    }, "✕")
+                  )
+                ),
+                e("button", { type:"button", className:"btn-secondary", onClick:addPrimerRow }, "+ Добавить праймер")
+              ),
+              e("div", { className:"actions" },
+                e("button", {
+                  type:"button",
+                  className:"btn-primary",
+                  onClick:handleRun,
+                  disabled:loading
+                }, loading ? "Расчёт..." : "Запустить анализ")
+              ),
+              renderTabFileLinks("form")
+            )
+            ,
+            activeTab==="dimers" && e("section", { className:"panel" },
+              e("div", { className:"card" },
+                e("h2", null, "Отчёт по гомодимерам"),
+                renderTabFileLinks("dimers"),
+                (!homoQc || !homoQc.length) && e("p", null, "Данные по гомодимерам отсутствуют."),
+                homoQc && homoQc.length > 0 && e("table", { className:"bindings-table" },
+                  e("thead", null,
+                    e("tr", null,
+                      e("th", null, "Праймер"),
+                      e("th", null, "Tm праймера"),
+                      e("th", null, "Hairpin Tm"),
+                      e("th", null, "Hairpin dG"),
+                      e("th", null, "Hairpin статус"),
+                      e("th", null, "Hairpin причина"),
+                      e("th", null, "Homodimer Tm"),
+                      e("th", null, "Homodimer dG"),
+                      e("th", null, "Homodimer статус"),
+                      e("th", null, "Homodimer причина")
+                    )
+                  ),
+                  e("tbody", null,
+                    homoQc.map((row, idx) =>
+                      e("tr", { key:idx },
+                        e("td", null, row.Primer),
+                        e("td", null, Number(row.Tm_primer||0).toFixed(2)),
+                        e("td", { className: row.Hairpin_Status === "BAD" ? "status-bad" : (row.Hairpin_Status === "OK" ? "status-ok" : "") }, Number(row.Hairpin_Tm||0).toFixed(2)),
+                        e("td", { className: row.Hairpin_Status === "BAD" ? "status-bad" : (row.Hairpin_Status === "OK" ? "status-ok" : "") }, Number(row.Hairpin_dG||0).toFixed(2)),
+                        e("td", { className: row.Hairpin_Status === "BAD" ? "status-bad" : (row.Hairpin_Status === "OK" ? "status-ok" : "") }, row.Hairpin_Status || ""),
+                        e("td", { className: row.Hairpin_Status === "BAD" ? "status-bad" : (row.Hairpin_Status === "OK" ? "status-ok" : "") }, row.Hairpin_Reason || ""),
+                        e("td", { className: row.Status === "BAD" ? "status-bad" : (row.Status === "OK" ? "status-ok" : "") }, Number(row.Homodimer_Tm||0).toFixed(2)),
+                        e("td", { className: row.Status === "BAD" ? "status-bad" : (row.Status === "OK" ? "status-ok" : "") }, Number(row.Homodimer_dG||0).toFixed(2)),
+                        e("td", { className: row.Status === "BAD" ? "status-bad" : (row.Status === "OK" ? "status-ok" : "") }, row.Status || ""),
+                        e("td", { className: row.Status === "BAD" ? "status-bad" : (row.Status === "OK" ? "status-ok" : "") }, row.Reason || "")
+                      )
+                    )
+                  )
+                )
+              ),
+              e("div", { className:"card" },
+                e("h2", null, "Матрица димеров (Tm / dG)"),
+                (!dimersMatrix || !dimersMatrix.length) && e("p", null, "Матрица димеров пока недоступна. Запустите анализ."),
+                dimersMatrix && dimersMatrix.length > 0 && (() => {
+                  const names = Array.from(new Set(dimersMatrix.map(d => [d.Primer1, d.Primer2]).flat()));
+                  names.sort();
+                  const findCell = (p1, p2) => {
+                    return dimersMatrix.find(d =>
+                      (d.Primer1 === p1 && d.Primer2 === p2) ||
+                      (d.Primer1 === p2 && d.Primer2 === p1)
+                    );
+                  };
+                  return e("table", { className:"bindings-table" },
+                    e("thead", null,
+                      e("tr", null,
+                        e("th", null, ""),
+                        names.map(n => e("th", { key:n }, n))
+                      )
+                    ),
+                    e("tbody", null,
+                      names.map(rowName =>
+                        e("tr", { key:rowName },
+                          e("th", null, rowName),
+                          names.map(colName => {
+                            const cell = findCell(rowName, colName);
+                              const cls = cell
+                                ? (cell.Status === "BAD" ? "status-bad" : (cell.Status === "OK" ? "status-ok" : ""))
+                                : "";
+                              return e("td", { key:colName, className:cls },
+                                cell ? `${Number(cell.Tm||0).toFixed(1)} / ${Number(cell.dG||0).toFixed(1)}` : ""
+                              );
+                          })
+                        )
+                      )
+                    )
+                  );
+                })()
+              )
+            ),
+            activeTab==="bindings" && e("section", { className:"panel" },
+              e("div", { className:"card" },
+                e("h2", null, "Посадки праймеров"),
+                renderTabFileLinks("bindings"),
+                (!bindings || !bindings.length) && e("p", null, "Посадок не найдено. Попробуйте ослабить пороги mismatches или параметры ампликонов."),
+                bindings && bindings.length > 0 && e("div", { style:{ display:"flex", gap:"16px" } },
+                  e("div", { style:{ minWidth:"200px", maxHeight:"320px", overflowY:"auto", borderRight:"1px solid #1f2937", paddingRight:"8px" } },
+                    e("h3", { style:{ marginTop:0, fontSize:"14px" } }, "Праймеры"),
+                    Array.from(new Set(bindings.map(b => b.Primer))).map(name =>
+                      e("div", {
+                        key:name,
+                        style:{
+                          padding:"4px 6px",
+                          cursor:"pointer",
+                          borderRadius:"6px",
+                          background: selectedPrimer===name ? "#1d4ed8" : "transparent"
+                        },
+                        onClick:()=>setSelectedPrimer(name)
+                      }, name)
+                    )
+                  ),
+                  e("div", { style:{ flex:1 } },
+                    e("h3", { style:{ marginTop:0, fontSize:"14px" } },
+                      selectedPrimer ? "Посадки праймера: " + selectedPrimer : "Выберите праймер слева"
+                    ),
+                    selectedPrimer && e("table", { className:"bindings-table" },
+                      e("thead", null,
+                        e("tr", null,
+                          e("th", null, "Start"),
+                          e("th", null, "End"),
+                          e("th", null, "Strand"),
+                          e("th", null, "Total mismatches"),
+                          e("th", null, "3'-mismatches"),
+                        )
+                      ),
+                      e("tbody", null,
+                        bindings.filter(b => b.Primer === selectedPrimer).map((b, idx) =>
+                          e("tr", { key:idx },
+                            e("td", null, b.Start),
+                            e("td", null, b.End),
+                            e("td", null, b.Strand),
+                            e("td", null, b.Total_mismatches),
+                          e("td", null, b.Mismatches_3prime)
+                          )
+                        )
+                      )
+                    )
+                  )
+                )
+              )
+            ),
+            activeTab==="products" && e("section", { className:"panel" },
+              e("div", { className:"card" },
+                e("h2", null, "Полученные продукты ПЦР"),
+                renderTabFileLinks("products"),
+                (!products || !products.length) && e("p", null, "Продукты не найдены. Попробуйте изменить параметры ампликонов или mismatches."),
+                products && products.length > 0 && e(React.Fragment, null,
+                  e("div", { className:"actions", style:{ marginBottom:"8px" } },
+                    e("button", {
+                      type:"button",
+                      className:"btn-secondary",
+                      onClick:downloadProductsCsv
+                    }, "Скачать CSV (разделитель ;)"),
+                  ),
+                  e("table", { className:"bindings-table" },
+                    e("thead", null,
+                      e("tr", null,
+                        e("th", null, "Forward_primer"),
+                        e("th", null, "Reverse_primer"),
+                        e("th", null, "Amplicon_start"),
+                        e("th", null, "Amplicon_end"),
+                        e("th", null, "Product_size"),
+                        e("th", null, "Tm_F"),
+                        e("th", null, "Tm_R"),
+                        e("th", null, "Tm_diff"),
+                        e("th", null, "Heterodimer_TM"),
+                        e("th", null, "Heterodimer_dG"),
+                        e("th", null, "3prime_matches"),
+                        e("th", null, "Forward_sequence"),
+                        e("th", null, "Reverse_sequence"),
+                        e("th", null, "human_status"),
+                        e("th", null, "Hum_BLAST")
+                      )
+                    ),
+                    e("tbody", null,
+                      products.map((p, idx) =>
+                        e("tr", { key:idx },
+                          e("td", null, p.Forward_primer),
+                          e("td", null, p.Reverse_primer),
+                          e("td", null, p.Amplicon_start),
+                          e("td", null, p.Amplicon_end),
+                          e("td", null, p.Product_size),
+                          e("td", null, Number(p.Tm_F||0).toFixed(2)),
+                          e("td", null, Number(p.Tm_R||0).toFixed(2)),
+                          e("td", null, Number(p.Tm_diff||0).toFixed(1)),
+                          e("td", null, Number(p.Heterodimer_TM||0).toFixed(2)),
+                          e("td", null, Number(p.Heterodimer_dG||0).toFixed(2)),
+                          e("td", null, p["3prime_matches"]),
+                          e("td", null, p.Forward_sequence),
+                          e("td", null, p.Reverse_sequence),
+                          e("td", null, p.human_status || ""),
+                          e("td", null, p.Hum_BLAST || "")
+                        )
+                      )
+                    )
+                  )
+                )
+              )
+            ),
+            activeTab==="map" && e("section", { className:"panel" },
+              e("div", { className:"card" },
+                e("h2", null, "Визуализация продуктов"),
+                renderTabFileLinks("map"),
+                e("p", { style:{ color:"#9ca3af", marginTop:0 } },
+                  "Референсные аннотации, праймеры (стрелки) и возможные ПЦР‑продукты. Наведите курсор для деталей, блоки можно перетаскивать."
+                ),
+                (window.AnnotationMapView
+                  ? e(window.AnnotationMapView, {
+                      data: annotationMap,
+                      conservation: conservation,
+                      products: products,
+                      schemes: pcrSchemes,
+                      onSchemesChange: setPcrSchemes,
+                      laneMaps: laneMaps,
+                      onLaneMapsChange: setLaneMaps,
+                      runId: runId
+                    })
+                  : e("p", null, "Компонент схемы не загружен (annotation_map.js)."))
+              )
+            ),
+            activeTab==="consQc" && e("section", { className:"panel" },
+              e("div", { className:"card" },
+                e("h2", null, "QC продуктов по консенсусу"),
+                renderTabFileLinks("consQc"),
+                e("p", { style:{ color:"#9ca3af", marginTop:0 } },
+                  "Mismatches ≤ MAX_MISMATCHES_TOTAL / MAX_MISMATCHES_3PRIME; инделы ≤ MAX_INDELS_TOTAL / MAX_INDELS_3PRIME (если пороги заданы)."
+                ),
+                (!conservation || !conservation.length) && e("p", null, "Нет данных по консервативности — загрузите таблицу консервативности и запустите анализ."),
+                conservation && conservation.length > 0 && ((!consensusQc || !consensusQc.length) ?
+                  e("p", null, "Нет продуктов или нет данных для QC.") :
+                  e("table", { className:"bindings-table" },
+                    e("thead", null,
+                      e("tr", null,
+                        e("th", null, "Forward_primer"),
+                        e("th", null, "Reverse_primer"),
+                        e("th", null, "Product_size"),
+                        e("th", null, "F mm(total)"),
+                        e("th", null, "F mm(3')"),
+                        e("th", null, "F indels"),
+                        e("th", null, "F indels(3')"),
+                        e("th", null, "R mm(total)"),
+                        e("th", null, "R mm(3')"),
+                        e("th", null, "R indels"),
+                        e("th", null, "R indels(3')"),
+                        e("th", null, "Pass")
+                      )
+                    ),
+                    e("tbody", null,
+                      consensusQc.map((r, idx) => {
+                        const cls = r.Pass ? "status-ok" : "status-bad";
+                        return e("tr", { key:idx, className:cls },
+                          e("td", null, r.Forward_primer),
+                          e("td", null, r.Reverse_primer),
+                          e("td", null, r.Product_size),
+                          e("td", null, r.F_Mismatches_total),
+                          e("td", null, r.F_Mismatches_3prime),
+                          e("td", null, r.F_Indels_total),
+                          e("td", null, r.F_Indels_3prime),
+                          e("td", null, r.R_Mismatches_total),
+                          e("td", null, r.R_Mismatches_3prime),
+                          e("td", null, r.R_Indels_total),
+                          e("td", null, r.R_Indels_3prime),
+                          e("td", null, r.Pass ? "OK" : "FAIL"),
+                        );
+                      })
+                    )
+                  )
+                )
+              )
+            ),
+            activeTab==="blast" && e("section", { className:"panel" },
+              e("div", { className:"card" },
+                e("h2", null, "BLAST‑посадки праймеров на референс"),
+                renderTabFileLinks("blast"),
+                (!blastBindings || !blastBindings.length) && e("p", null, "BLAST‑посадки не найдены или BLAST выключен."),
+                blastBindings && blastBindings.length > 0 && e("table", { className:"bindings-table" },
+                  e("thead", null,
+                    e("tr", null,
+                      e("th", null, "Праймер"),
+                      e("th", null, "Цепь"),
+                      e("th", null, "S_start"),
+                      e("th", null, "S_end"),
+                      e("th", null, "Total mismatches"),
+                      e("th", null, "3'-mismatches")
+                    )
+                  ),
+                  e("tbody", null,
+                    blastBindings.map((b, idx) => {
+                      const total = Number(b.Total_mismatches || 0);
+                      const mm3p = Number(b.Mismatches_3prime || 0);
+                      const bad = (total > params.MAX_MISMATCHES_TOTAL) || (mm3p > params.MAX_MISMATCHES_3PRIME);
+                      const cls = bad ? "status-bad" : "status-ok";
+                      return e("tr", { key:idx, className:cls },
+                        e("td", null, b.Primer),
+                        e("td", null, b.Strand),
+                        e("td", null, b.S_start),
+                        e("td", null, b.S_end),
+                        e("td", null, b.Total_mismatches),
+                        e("td", null, b.Mismatches_3prime)
+                      );
+                    })
+                  )
+                )
+              )
+            ),
+            activeTab==="blastHuman" && e("section", { className:"panel" },
+              e("div", { className:"card" },
+                e("h2", null, "BLAST‑результаты праймеров по человеку"),
+                renderTabFileLinks("blastHuman"),
+                (!blastHumanSummary || !blastHumanSummary.length) && e("p", null, "BLAST‑результаты по человеку не найдены или BLAST выключен."),
+                blastHumanSummary && blastHumanSummary.length > 0 && e("table", { className:"bindings-table" },
+                  e("thead", null,
+                    e("tr", null,
+                      e("th", null, "Праймер"),
+                      e("th", null, "Количество совпадений"),
+                      e("th", null, "Лучший mismatch"),
+                      e("th", null, "Длина лучшего совпадения")
+                    )
+                  ),
+                  e("tbody", null,
+                    blastHumanSummary.map((b, idx) =>
+                      e("tr", { key:idx },
+                        e("td", null, b.Primer),
+                        e("td", null, b.Hits_count),
+                        e("td", null, b.Best_mismatch),
+                        e("td", null, b.Best_length)
+                      )
+                    )
+                  )
+                )
+              )
+            )
+            ,
+            activeTab==="cons" && e("section", { className:"panel" },
+              e("div", { className:"card" },
+                e("h2", null, "Консервативность посадок праймеров"),
+                renderTabFileLinks("cons"),
+                (!conservation || !conservation.length) && e("p", null, "Нет данных. Загрузите таблицу консервативности и запустите анализ."),
+                conservation && conservation.length > 0 && conservation.map((r, idx) =>
+                  e("div", { key:idx, className:"dimer-block" },
+                    e("div", { className:"dimer-header" },
+                      r.Primer, " (", r.Strand, ") ",
+                      "Start=", r.Start, " End=", r.End,
+                      r.S_index_avg !== null && r.S_index_avg !== undefined ? `, avg S=${Number(r.S_index_avg).toFixed(3)}` : ""
+                    ),
+                    (() => {
+                      const p = (r.Primer_seq || "").split("");
+                      const c = (r.Consensus_seq || "").split("");
+                      const s = (r.S_index || []);
+                      const L = Math.max(p.length, c.length, s.length);
+                      return e("div", { style:{ overflowX:"auto" } },
+                        e("table", { className:"cons-grid" },
+                          e("tbody", null,
+                            e("tr", null,
+                              e("td", { className:"row-label" }, "Праймер"),
+                              Array.from({length:L}).map((_, i) => e("td", { key:i }, p[i] || " "))
+                            ),
+                            e("tr", null,
+                              e("td", { className:"row-label" }, "Консенсус"),
+                              Array.from({length:L}).map((_, i) => e("td", { key:i }, c[i] || " "))
+                            ),
+                            e("tr", null,
+                              e("td", { className:"row-label" }, "S_index"),
+                              Array.from({length:L}).map((_, i) => {
+                                const v = s[i];
+                                return e("td", { key:i }, (v === null || v === undefined) ? "" : Number(v).toFixed(2));
+                              })
+                            )
+                          )
+                        )
+                      );
+                    })()
+                  )
+                )
+              )
+            )
+          )
+        );
+      }
+
+      const root = ReactDOM.createRoot(document.getElementById("root"));
+      root.render(React.createElement(App));
+    </script>
+  </body>
+</html>

@@ -1,0 +1,34 @@
+# Local / portable Windows runtime (do not ship to Linux server)
+.venv/
+portable_python/
+
+# Heavy BLAST tooling and databases (install separately on server if needed)
+ncbi-blast-2.17.0+/
+human_genome/
+ref_viruses_rep_genomes/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+
+# Temporary BLAST / pipeline files
+tmp*.fa
+tmp*.out
+tmp_subject_ref.fa
+
+# Per-run artifacts
+runs/
+*.zip
+
+# IDE / OS
+.vs/
+.idea/
+*.pyproj.user
+.DS_Store
+Thumbs.db
+
+# Env / secrets
+.env
+.env.*
