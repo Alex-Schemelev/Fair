@@ -119,6 +119,7 @@ def run_pcr():
 
     primers = payload.get("primers", [])
     blast_enabled = bool(payload.get("blast_enabled", True))
+    blast_human_enabled = bool(payload.get("blast_human_enabled", False))
     params = payload.get("params", {})
     filters = payload.get("filters", {})
 
@@ -171,6 +172,7 @@ def run_pcr():
     script_path = os.path.join(os.path.dirname(__file__), "In_silico_PCR.py")
     env = os.environ.copy()
     env["BLAST_ENABLED"] = "1" if blast_enabled else "0"
+    env["BLAST_HUMAN_ENABLED"] = "1" if blast_human_enabled else "0"
     env["PRIMER_CSV"] = PRIMERS_FILENAME
     env["TARGET_GB"] = REF_FILENAME
 
@@ -207,7 +209,8 @@ def run_pcr():
         with open(log_path, "w", encoding="utf-8") as logf:
             logf.write("executable: " + str(sys.executable) + "\n")
             logf.write("script: " + str(script_path) + "\n")
-            logf.write("BLAST_ENABLED=" + str(env.get("BLAST_ENABLED")) + "\n\n")
+            logf.write("BLAST_ENABLED=" + str(env.get("BLAST_ENABLED")) + "\n")
+            logf.write("BLAST_HUMAN_ENABLED=" + str(env.get("BLAST_HUMAN_ENABLED")) + "\n\n")
             logf.flush()
             proc = subprocess.run(
                 [sys.executable, script_path],
@@ -543,6 +546,7 @@ def run_pcr():
     response_payload = {
         "status": "ok",
         "blast_enabled": blast_enabled,
+        "blast_human_enabled": blast_human_enabled,
         "dimers": dimers,
         "has_results": bool(products),
         "bindings": bindings,
@@ -766,16 +770,26 @@ def download_file(run_id, filename):
 
 
 if __name__ == "__main__":
-    import webbrowser
-    from threading import Timer
-
     ensure_frontend_built()
     cleanup_old_runs(RUNS_DIR)
 
-    def open_browser():
-        webbrowser.open("http://127.0.0.1:5000/")
+    host = os.environ.get("HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", "5000"))
+    # Open browser only for local interactive runs (not on a VPS).
+    open_browser = os.environ.get(
+        "OPEN_BROWSER",
+        "1" if host in ("127.0.0.1", "localhost") else "0",
+    ) == "1"
 
-    Timer(1.0, open_browser).start()
+    if open_browser:
+        import webbrowser
+        from threading import Timer
+
+        def _open():
+            webbrowser.open(f"http://{host}:{port}/")
+
+        Timer(1.0, _open).start()
+
     # debug=False, чтобы отключить авто-перезапуск (watchdog),
     # который может рвать запросы во время длительного анализа
-    app.run(debug=False)
+    app.run(host=host, port=port, debug=False)

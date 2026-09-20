@@ -1,0 +1,19 @@
+[Unit]
+Description=In silico PCR web UI
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/fair
+Environment=HOST=0.0.0.0
+Environment=PORT=8000
+Environment=OPEN_BROWSER=0
+# Optional: Environment=BLASTN_PATH=/usr/bin/blastn
+ExecStart=/opt/fair/.venv/bin/gunicorn --bind 0.0.0.0:8000 --workers 1 --threads 4 --timeout 1800 web_app:app
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -30,10 +30,29 @@ PRIMER_CSV = os.environ.get("PRIMER_CSV", "primers.csv")
 TARGET_GB = os.environ.get("TARGET_GB", "reference.gb")
 
 BASE_DIR = os.path.dirname(__file__)
-BLASTN_PATH = os.path.join(BASE_DIR, r"ncbi-blast-2.17.0+\bin\blastn.exe")
+
+
+def _resolve_blastn_path():
+    """Windows bundle, Linux local bin, PATH, or BLASTN_PATH env."""
+    override = os.environ.get("BLASTN_PATH")
+    if override:
+        return override
+    candidates = [
+        os.path.join(BASE_DIR, "ncbi-blast-2.17.0+", "bin", "blastn.exe"),
+        os.path.join(BASE_DIR, "ncbi-blast-2.17.0+", "bin", "blastn"),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    from shutil import which
+    found = which("blastn")
+    return found or candidates[0]
+
+
+BLASTN_PATH = _resolve_blastn_path()
 # для BLAST по человеку используем ОТНОСИТЕЛЬНЫЙ путь к базе,
 # а cwd указываем BASE_DIR, чтобы избежать проблем с пробелами/скобками в пути
-DB_HUMAN    = r"human_genome\GCF_000001405.39_top_level"
+DB_HUMAN = os.path.join("human_genome", "GCF_000001405.39_top_level")
 
 # Базовые значения настроек (по умолчанию)
 MIN_AMPLICON_DEFAULT = 100
@@ -618,6 +637,7 @@ pd.DataFrame(bindings_rows).to_csv("primer_binding_sites.csv", index=False)
 # BLAST-посадки праймеров на референс (лучший хит)
 blast_rows = []
 blast_enabled = os.getenv("BLAST_ENABLED", "1") == "1"
+blast_human_enabled = os.getenv("BLAST_HUMAN_ENABLED", "0") == "1"
 
 if blast_enabled:
     for name, pdata in primer_db.items():
@@ -827,10 +847,9 @@ print(f"[STEP 2] DONE — найдено пар с ампликонами: {len(
 
 print("[STEP 3] BLAST праймеров против человека")
 
-blast_enabled = os.getenv("BLAST_ENABLED", "1") == "1"
 human_hits = {}
 
-if blast_enabled:
+if blast_human_enabled:
     for i, (pname, pdata) in enumerate(primer_db.items()):
         print(f"  [{i+1}/{len(primer_db)}] BLAST {pname}")
         human_hits[pname] = blast_primer(pdata['dna_variants'][0])
@@ -859,13 +878,13 @@ if blast_enabled:
               f"best length={human_blast_rows[-1]['Best_length']}")
     pd.DataFrame(human_blast_rows).to_csv("primer_human_blast_summary.csv", index=False)
 else:
-    print("[STEP 3] Пропущен (BLAST отключен)\n")
+    print("[STEP 3] Пропущен (BLAST по человеку отключен)\n")
 
 # ---------- QC НА ЧЕЛОВЕКЕ ----------
 
 print("[STEP 4] QC неспецифических ампликонов на человеке")
 
-if blast_enabled:
+if blast_human_enabled:
 
     for idx, row in enumerate(results):
 
@@ -908,9 +927,9 @@ if blast_enabled:
 
     print("[STEP 4] DONE\n")
 else:
-    print("[STEP 4] Пропущен (BLAST отключен)\n")
+    print("[STEP 4] Пропущен (BLAST по человеку отключен)\n")
     for row in results:
-        row['human_status'] = "BLAST disabled"
+        row['human_status'] = "BLAST human disabled"
         row['Hum_BLAST'] = "not product"
 
 # ---------- GENBANK ----------

@@ -86,6 +86,7 @@
         const [primersTableFile, setPrimersTableFile] = React.useState(null);
         const [conservationTableFile, setConservationTableFile] = React.useState(null);
         const [blastEnabled, setBlastEnabled] = React.useState(true);
+        const [blastHumanEnabled, setBlastHumanEnabled] = React.useState(false);
         const [bindings, setBindings] = React.useState([]);
         const [selectedPrimer, setSelectedPrimer] = React.useState(null);
         const [dimersMatrix, setDimersMatrix] = React.useState([]);
@@ -308,6 +309,7 @@
             formData.append("payload", JSON.stringify({
               primers: nonEmpty,
               blast_enabled: blastEnabled,
+              blast_human_enabled: blastHumanEnabled,
               params: params,
               filters: {
                 min_s_index_avg: params.MIN_S_INDEX_AVG,
@@ -417,12 +419,23 @@
                   })
                 ),
                 e("div", { className:"field inline" },
-                  e("label", null, "Проверка специфичности (BLAST)"),
+                  e("label", null, "BLAST по референсу (посадки праймеров)"),
                   e("label", { className:"switch" },
                     e("input", {
                       type:"checkbox",
                       checked: blastEnabled,
                       onChange: ev => setBlastEnabled(ev.target.checked)
+                    }),
+                    e("span", { className:"slider" })
+                  )
+                ),
+                e("div", { className:"field inline" },
+                  e("label", null, "BLAST по человеку (тяжёлый; нужен human_genome)"),
+                  e("label", { className:"switch" },
+                    e("input", {
+                      type:"checkbox",
+                      checked: blastHumanEnabled,
+                      onChange: ev => setBlastHumanEnabled(ev.target.checked)
                     }),
                     e("span", { className:"slider" })
                   )
