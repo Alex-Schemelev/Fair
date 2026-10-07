@@ -4,16 +4,19 @@ After=network.target
 
 [Service]
 Type=simple
-User=www-data
-Group=www-data
-WorkingDirectory=/opt/fair
+User=root
+Group=root
+WorkingDirectory=/root/Fair
 Environment=HOST=0.0.0.0
 Environment=PORT=8000
 Environment=OPEN_BROWSER=0
+Environment=PYTHONUNBUFFERED=1
 # Optional: Environment=BLASTN_PATH=/usr/bin/blastn
-ExecStart=/opt/fair/.venv/bin/gunicorn --bind 0.0.0.0:8000 --workers 1 --threads 4 --timeout 1800 web_app:app
+LimitNOFILE=65535
+ExecStart=/root/Fair/deploy/run_gunicorn.sh
 Restart=on-failure
 RestartSec=5
+TimeoutStopSec=35
 
 [Install]
 WantedBy=multi-user.target
