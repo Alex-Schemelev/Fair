@@ -221,18 +221,12 @@
    * direction > 0 — плюс-цепь (координата растёт), direction < 0 — минус-цепь.
    * На кольце допускается переход через начало координат. Разрыв — всё, что не покрыто.
    */
-  function strandCover(end5, end3, seqLen, direction, circular) {
+  function strandCover(end5, end3, seqLen, direction) {
     if (end5 === end3) {
       return { segments: [], invalid: true, end5: end5, end3: end3, wraps: false };
     }
-    if (!circular) {
-      if (direction > 0 && end5 > end3) {
-        return { segments: [], invalid: true, end5: end5, end3: end3, wraps: false };
-      }
-      if (direction < 0 && end5 < end3) {
-        return { segments: [], invalid: true, end5: end5, end3: end3, wraps: false };
-      }
-    }
+    // 3' < 5' у плюс-цепи (и 5' < 3' у минус-цепи) — участок идёт через стык
+    // последней и первой координаты: там нить непрерывна, разрыв только между концами.
     if (direction > 0) {
       if (end5 < end3) {
         return { segments: [[end5, end3]], invalid: false, end5: end5, end3: end3, wraps: false };
@@ -263,39 +257,38 @@
     }, 0);
   }
 
-  // На кольце концы, которые почти смыкаются, раздвигаются, чтобы разрыв был виден.
-  function circularInsets(segments, seqLen) {
-    const pads = (segments || []).map(function () {
-      return { lo: 0, hi: 0 };
-    });
-    if (!segments || !segments.length) return pads;
-    const minBp = Math.max(2, Math.round(seqLen * 0.012));
-    const sorted = segments
-      .map(function (seg, i) {
-        return { lo: seg[0], hi: seg[1], i: i };
-      })
-      .sort(function (a, b) {
-        return a.lo - b.lo;
-      });
-    for (let k = 0; k < sorted.length; k++) {
-      const cur = sorted[k];
-      const nxt = sorted[(k + 1) % sorted.length];
-      const gapBp =
-        k < sorted.length - 1 ? nxt.lo - cur.hi - 1 : seqLen - cur.hi + (nxt.lo - 1);
-      if (gapBp >= minBp) continue;
-      const need = minBp - Math.max(0, gapBp);
-      const curRoom = Math.max(0, cur.hi - cur.lo - pads[cur.i].lo - pads[cur.i].hi);
-      const nxtRoom = Math.max(0, nxt.hi - nxt.lo - pads[nxt.i].lo - pads[nxt.i].hi);
-      const takeCur = Math.min(curRoom, need / 2);
-      const takeNxt = Math.min(nxtRoom, need - takeCur);
-      pads[cur.i].hi += takeCur;
-      pads[nxt.i].lo += takeNxt;
-    }
-    return pads;
-  }
-
   function angleAt(pos, seqLen) {
     return -Math.PI / 2 + ((pos - 1) / seqLen) * 2 * Math.PI;
+  }
+
+  function arcPathDirected(cx, cy, r, a0, sweep, clockwise) {
+    if (!(sweep > 0.004)) return { d: "", a1: a0 };
+    const a1 = clockwise ? a0 + sweep : a0 - sweep;
+    const large = sweep > Math.PI ? 1 : 0;
+    const x0 = cx + r * Math.cos(a0);
+    const y0 = cy + r * Math.sin(a0);
+    const x1 = cx + r * Math.cos(a1);
+    const y1 = cy + r * Math.sin(a1);
+    return {
+      d:
+        "M " +
+        x0.toFixed(2) +
+        " " +
+        y0.toFixed(2) +
+        " A " +
+        r.toFixed(2) +
+        " " +
+        r.toFixed(2) +
+        " 0 " +
+        large +
+        " " +
+        (clockwise ? 1 : 0) +
+        " " +
+        x1.toFixed(2) +
+        " " +
+        y1.toFixed(2),
+      a1: a1,
+    };
   }
 
   function arcPath(cx, cy, r, a0, a1) {
@@ -770,8 +763,9 @@
         key: "plus",
         caption: "+",
         color: "#1d4ed8",
-        y: 34,
-        labelY: 30,
+        y: 46,
+        labelY: 36,
+        extraY: 60,
         dir: 1,
         end5: opts.ends.plus5,
         end3: opts.ends.plus3,
@@ -780,8 +774,9 @@
         key: "minus",
         caption: "−",
         color: "#be123c",
-        y: 52,
-        labelY: 64,
+        y: 74,
+        labelY: 88,
+        extraY: 102,
         dir: -1,
         end5: opts.ends.minus5,
         end3: opts.ends.minus3,
@@ -791,7 +786,7 @@
       e("text", { key: "strand-axis-title", x: 8, y: 22, fontSize: 10, fill: "#64748b" }, "нити"),
     ];
     specs.forEach(function (spec) {
-      const cover = strandCover(spec.end5, spec.end3, seqLen, spec.dir, opts.circular);
+      const cover = strandCover(spec.end5, spec.end3, seqLen, spec.dir);
       nodes.push(
         e(
           "text",
@@ -811,7 +806,7 @@
           e(
             "text",
             { key: spec.key + "-bad", x: leftPad, y: spec.y + 4, fontSize: 11, fill: "#b91c1c" },
-            "концы не заданы для этой формы генома"
+            "5′ и 3′ должны различаться"
           )
         );
         return;
@@ -835,36 +830,56 @@
       const threeOnRight = spec.dir > 0;
       const x5 = xStart(spec.end5);
       const x3 = threeOnRight ? xEnd(spec.end3) : xStart(spec.end3);
+      const t5 = "5′ " + spec.end5;
+      const t3 = "3′ " + spec.end3;
+      const w5 = t5.length * 6.4;
+      const w3 = t3.length * 6.4;
       const gap = Math.abs(x5 - x3);
-      const shift = gap < 46 ? 18 : 0;
+      const need = w5 + w3 + 10;
+      const shift = gap < need ? (need - gap) / 2 : 0;
       const anchor5 = spec.dir > 0 ? "start" : "end";
       const anchor3 = spec.dir > 0 ? "end" : "start";
+      const minX = 40;
+      const maxX = leftPad + plotW - 4;
+      const clampX = function (x) {
+        return Math.max(minX, Math.min(maxX, x));
+      };
+      const x5l = clampX(x5 + (spec.dir > 0 ? -shift : shift));
+      const x3l = clampX(x3 + (spec.dir > 0 ? shift : -shift));
+      const spanOf = function (x, anchor, w) {
+        if (anchor === "start") return [x, x + w];
+        if (anchor === "end") return [x - w, x];
+        return [x - w / 2, x + w / 2];
+      };
+      const s5 = spanOf(x5l, anchor5, w5);
+      const s3 = spanOf(x3l, anchor3, w3);
+      const y3 = s5[0] < s3[1] && s3[0] < s5[1] ? spec.extraY : spec.labelY;
       nodes.push(
         e(
           "text",
           {
             key: spec.key + "-l5",
-            x: x5 + (spec.dir > 0 ? -shift : shift),
+            x: x5l,
             y: spec.labelY,
             textAnchor: anchor5,
             fontSize: 10,
             fill: spec.color,
             fontWeight: 700,
           },
-          "5′ " + spec.end5
+          t5
         ),
         e(
           "text",
           {
             key: spec.key + "-l3",
-            x: x3 + (spec.dir > 0 ? shift : -shift),
-            y: spec.labelY,
+            x: x3l,
+            y: y3,
             textAnchor: anchor3,
             fontSize: 10,
             fill: spec.color,
             fontWeight: 700,
           },
-          "3′ " + spec.end3
+          t3
         )
       );
       const ah = 7;
@@ -889,256 +904,437 @@
     return nodes;
   }
 
+  function angDist(a, b) {
+    let d = Math.abs(a - b) % (Math.PI * 2);
+    if (d > Math.PI) d = Math.PI * 2 - d;
+    return d;
+  }
+
+  function arcsOverlap(a0, s0, a1, s1) {
+    function contains(start, sweep, ang) {
+      let d = ang - start;
+      while (d < 0) d += Math.PI * 2;
+      while (d >= Math.PI * 2) d -= Math.PI * 2;
+      return d <= sweep + 0.01;
+    }
+    return (
+      contains(a0, s0, a1) ||
+      contains(a0, s0, a1 + s1 * 0.5) ||
+      contains(a1, s1, a0) ||
+      contains(a1, s1, a0 + s0 * 0.5)
+    );
+  }
+
+  function packAngularLanes(items) {
+    const placed = [];
+    items
+      .slice()
+      .sort(function (a, b) {
+        return a.mid - b.mid;
+      })
+      .forEach(function (it) {
+        let lane = 0;
+        while (
+          lane < 14 &&
+          placed.some(function (p) {
+            return p.lane === lane && arcsOverlap(p.start, p.sweep, it.start, it.sweep);
+          })
+        ) {
+          lane += 1;
+        }
+        it.lane = lane;
+        placed.push({ lane: lane, start: it.start, sweep: it.sweep });
+      });
+    return items;
+  }
+
+  function stackSideLabels(items, cy, minY, maxY) {
+      const gap = 16;
+      const left = [];
+    const right = [];
+    items.forEach(function (it) {
+      (Math.cos(it.mid) >= 0 ? right : left).push(it);
+    });
+    function stack(list) {
+      list.sort(function (a, b) {
+        return Math.sin(a.mid) - Math.sin(b.mid);
+      });
+      if (!list.length) return;
+      const gapUse = list.length > 1 ? Math.min(gap, (maxY - minY) / (list.length - 1)) : gap;
+      const total = (list.length - 1) * gapUse;
+      const y0 = Math.max(minY, Math.min(cy - total / 2, maxY - total));
+      list.forEach(function (it, i) {
+        it.labelY = y0 + i * gapUse;
+      });
+    }
+    stack(left);
+    stack(right);
+    return { left: left, right: right };
+  }
+
+  function haloText(key, x, y, text, extra) {
+    const props = Object.assign(
+      {
+        key: key,
+        x: x,
+        y: y,
+        textAnchor: "middle",
+        dominantBaseline: "middle",
+        fontSize: 11,
+        fill: "#0f172a",
+        stroke: "#ffffff",
+        strokeWidth: 3,
+        paintOrder: "stroke",
+        style: { pointerEvents: "none" },
+      },
+      extra || {}
+    );
+    return e("text", props, text);
+  }
+
   function buildCircularMap(opts) {
     const seqLen = opts.seqLen;
     const ends = opts.ends;
-    const size = Math.max(420, Math.min(680, opts.size || 560));
-    const cx = size / 2;
-    const cy = size / 2 + 8;
-    const rPlus = size * 0.33;
-    const rMinus = size * 0.27;
-    const rTick = size * 0.38;
-    const nodes = [];
     const showTip = opts.showTip || function () {};
     const hideTip = opts.hideTip || function () {};
+    const minSweep = 0.055;
+    const primers = (opts.primers || []).map(function (feat) {
+      const plus = feat.strand !== "-";
+      const a0 = angleAt(feat.start, seqLen);
+      const a1 = angleAt((feat.end || feat.start) + 1, seqLen);
+      let sweep = a1 - a0;
+      while (sweep <= 0) sweep += Math.PI * 2;
+      const vis = Math.max(sweep, minSweep);
+      const mid = a0 + sweep / 2;
+      const start = mid - vis / 2;
+      return {
+        feat: feat,
+        plus: plus,
+        name: String(feat.name || feat.id || "primer"),
+        start: start,
+        sweep: vis,
+        mid: mid,
+        hit: opts.highlightPrimerNames && opts.highlightPrimerNames.has(feat.name),
+      };
+    });
+    const plusPrimers = packAngularLanes(primers.filter(function (p) { return p.plus; }));
+    const minusPrimers = packAngularLanes(primers.filter(function (p) { return !p.plus; }));
+    const maxPlusLane = plusPrimers.reduce(function (m, p) { return Math.max(m, p.lane); }, 0);
+    const maxMinusLane = minusPrimers.reduce(function (m, p) { return Math.max(m, p.lane); }, 0);
+    const laneStep = 14;
+    const refItems = (opts.refs || []).map(function (feat) {
+      const a0 = angleAt(feat.start, seqLen);
+      const a1 = angleAt((feat.end || feat.start) + 1, seqLen);
+      let sweep = a1 - a0;
+      while (sweep <= 0) sweep += Math.PI * 2;
+      if (sweep > Math.PI * 2 - 0.02) sweep = Math.PI * 2 - 0.02;
+      return { feat: feat, start: a0, sweep: sweep, mid: a0 + sweep / 2 };
+    });
+    packAngularLanes(refItems);
+    const maxRefLane = refItems.reduce(function (m, it) { return Math.max(m, it.lane); }, 0);
+    const refStep = 11;
+    const rRefInner = 80;
+    const rRefOuter = rRefInner + maxRefLane * refStep;
+    const rMinus = rRefOuter + 30;
+    const rPlus = rMinus + 34;
+    const rCoord = rPlus + 72;
+    const rPlusPrimer = rCoord + 26;
+    const rMinusPrimer = rPlusPrimer + (maxPlusLane + 1) * laneStep + 16;
+    const rOuter = rMinusPrimer + maxMinusLane * laneStep + 12;
+    const labelW = 210;
+    const rowH = 16;
+    const nLeft = primers.filter(function (p) { return Math.cos(p.mid) < 0; }).length;
+    const nRight = primers.length - nLeft;
+    const svgH = Math.max(rOuter * 2 + 48, Math.max(nLeft, nRight) * rowH + 28, 520);
+    const svgW = labelW * 2 + rOuter * 2 + 24;
+    const cx = svgW / 2;
+    const cy = svgH / 2;
+    const nodes = [];
 
-    nodes.push(
-      e("circle", {
-        key: "guide",
-        cx: cx,
-        cy: cy,
-        r: (rPlus + rMinus) / 2,
-        fill: "none",
-        stroke: "#e2e8f0",
-        strokeWidth: 18,
-      })
-    );
-
-    function drawStrand(spec) {
-      const cover = strandCover(spec.end5, spec.end3, seqLen, spec.dir, true);
-      if (cover.invalid || !cover.segments.length) return;
-      const pads = circularInsets(cover.segments, seqLen);
-      cover.segments.forEach(function (seg, idx) {
-        const lo = seg[0] + pads[idx].lo;
-        const hi = seg[1] - pads[idx].hi;
-        if (hi < lo) return;
-        const d = arcPath(cx, cy, spec.r, angleAt(lo, seqLen), angleAt(hi + 1, seqLen));
-        if (!d) return;
-        nodes.push(
-          e("path", {
-            key: spec.key + "-arc-" + idx,
-            d: d,
-            fill: "none",
-            stroke: spec.color,
-            strokeWidth: 8,
-            strokeLinecap: "butt",
-          })
-        );
-      });
-      const a5raw = angleAt(spec.end5, seqLen);
-      const a3raw = spec.dir > 0 ? angleAt(spec.end3 + 1, seqLen) : angleAt(spec.end3, seqLen);
-      let delta = a3raw - a5raw;
-      while (delta > Math.PI) delta -= Math.PI * 2;
-      while (delta < -Math.PI) delta += Math.PI * 2;
-      const a5 = Math.abs(delta) < 0.4 ? a5raw - 0.22 : a5raw;
-      const a3 = Math.abs(delta) < 0.4 ? a3raw + 0.22 : a3raw;
-      const labelR = spec.r + (spec.dir > 0 ? 16 : -16);
-      nodes.push(
-        e(
-          "text",
-          {
-            key: spec.key + "-t5",
-            x: cx + labelR * Math.cos(a5),
-            y: cy + labelR * Math.sin(a5),
-            textAnchor: "middle",
-            dominantBaseline: "middle",
-            fontSize: 11,
-            fill: spec.color,
-            fontWeight: 700,
-          },
-          "5′"
-        ),
-        e(
-          "text",
-          {
-            key: spec.key + "-t3",
-            x: cx + labelR * Math.cos(a3),
-            y: cy + labelR * Math.sin(a3),
-            textAnchor: "middle",
-            dominantBaseline: "middle",
-            fontSize: 11,
-            fill: spec.color,
-            fontWeight: 700,
-          },
-          "3′"
-        ),
-        e("polygon", {
-          key: spec.key + "-arr",
-          points: arrowPoints(cx, cy, spec.r, a3raw, spec.dir > 0 ? 1 : -1, 7),
-          fill: spec.color,
-        })
-      );
+    function strandGeom(end5, end3, direction) {
+      const clockwise = direction > 0;
+      const a5 = angleAt(end5, seqLen);
+      const a3 = clockwise ? angleAt(end3 + 1, seqLen) : angleAt(end3, seqLen);
+      let sweep = clockwise ? a3 - a5 : a5 - a3;
+      while (sweep <= 0) sweep += Math.PI * 2;
+      const minGap = 0.1;
+      let aStart = a5;
+      let draw = sweep;
+      if (sweep > Math.PI * 2 - minGap) {
+        const cut = (sweep - (Math.PI * 2 - minGap)) / 2;
+        aStart = clockwise ? a5 + cut : a5 - cut;
+        draw = Math.PI * 2 - minGap;
+      }
+      const aEnd = clockwise ? aStart + draw : aStart - draw;
+      return { a5: a5, a3: a3, aStart: aStart, aEnd: aEnd, draw: draw, clockwise: clockwise };
     }
 
-    drawStrand({ key: "plus", color: "#1d4ed8", r: rPlus, dir: 1, end5: ends.plus5, end3: ends.plus3 });
-    drawStrand({ key: "minus", color: "#be123c", r: rMinus, dir: -1, end5: ends.minus5, end3: ends.minus3 });
+    const plusGeom = strandGeom(ends.plus5, ends.plus3, 1);
+    const minusGeom = strandGeom(ends.minus5, ends.minus3, -1);
+    const plusCover = strandCover(ends.plus5, ends.plus3, seqLen, 1);
+    const minusCover = strandCover(ends.minus5, ends.minus3, seqLen, -1);
+    function gapSpan(from, to) {
+      let g = to - from;
+      while (g < 0) g += Math.PI * 2;
+      while (g >= Math.PI * 2) g -= Math.PI * 2;
+      return g;
+    }
+    function endOffset(gap) {
+      if (gap < 0.02) return 0.05;
+      return Math.min(0.12, gap * 0.35);
+    }
+    const plusGap = gapSpan(plusGeom.a3, plusGeom.a5);
+    const minusGap = gapSpan(minusGeom.a5, minusGeom.a3);
+    const plusOff = endOffset(plusGap);
+    const minusOff = endOffset(minusGap);
+    const plus5Ang = plusGeom.a5 - plusOff;
+    const plus3Ang = plusGeom.a3 + plusOff;
+    const minus5Ang = minusGeom.a5 + minusOff;
+    const minus3Ang = minusGeom.a3 - minusOff;
+    const plusTight = angDist(plus5Ang, plus3Ang) < 0.55;
+    const minusTight = angDist(minus5Ang, minus3Ang) < 0.55;
+    const endMarks = [
+      {
+        key: "p5",
+        text: "5′ " + ends.plus5,
+        ang: plus5Ang,
+        color: "#1d4ed8",
+        r: plusTight ? rPlus + 18 : rPlus + 26,
+      },
+      {
+        key: "p3",
+        text: "3′ " + ends.plus3,
+        ang: plus3Ang,
+        color: "#1d4ed8",
+        r: plusTight ? rPlus + 44 : rPlus + 26,
+      },
+      {
+        key: "m5",
+        text: "5′ " + ends.minus5,
+        ang: minus5Ang,
+        color: "#be123c",
+        r: minusTight ? rMinus - 16 : rMinus + 17,
+      },
+      {
+        key: "m3",
+        text: "3′ " + ends.minus3,
+        ang: minus3Ang,
+        color: "#be123c",
+        r: minusTight ? rMinus + 17 : rMinus + 17,
+      },
+    ];
 
-    const stepGuess = Math.pow(10, Math.max(0, Math.floor(Math.log10(seqLen)) - 1));
-    const step = stepGuess || 100;
-    const ticks = [1];
-    for (let p = step; p < seqLen; p += step) ticks.push(p);
-    ticks.forEach(function (p) {
-      const a = angleAt(p, seqLen);
-      nodes.push(
-        e("line", {
-          key: "ct" + p,
-          x1: cx + (rTick - 8) * Math.cos(a),
-          y1: cy + (rTick - 8) * Math.sin(a),
-          x2: cx + rTick * Math.cos(a),
-          y2: cy + rTick * Math.sin(a),
-          stroke: "#94a3b8",
-        }),
-        e(
-          "text",
-          {
-            key: "ctl" + p,
-            x: cx + (rTick + 12) * Math.cos(a),
-            y: cy + (rTick + 12) * Math.sin(a),
-            textAnchor: "middle",
-            dominantBaseline: "middle",
-            fontSize: 10,
-            fill: "#64748b",
-          },
-          String(p)
-        )
-      );
-    });
-
-    (opts.refs || []).forEach(function (feat) {
-      const d = arcPath(cx, cy, size * 0.43, angleAt(feat.start, seqLen), angleAt(feat.end + 1, seqLen));
+    refItems.forEach(function (it) {
+      const radius = rRefInner + it.lane * refStep;
+      const d = arcPath(cx, cy, radius, it.start, it.start + it.sweep);
       if (!d) return;
-      const mid = angleAt((feat.start + feat.end) / 2 + 0.5, seqLen);
-      const sweep = (feat.end - feat.start + 1) / seqLen;
+      const feat = it.feat;
       nodes.push(
         e("path", {
           key: "ref-" + feat.id,
           d: d,
           fill: "none",
           stroke: colorFor(feat.type),
-          strokeWidth: 6,
+          strokeWidth: 5,
           strokeLinecap: "butt",
-          opacity: 0.85,
+          opacity: 0.9,
           onMouseEnter: function (ev) {
-            showTip(ev.clientX, ev.clientY, [
-              feat.name || feat.type,
-              feat.start + "–" + feat.end,
-            ]);
+            showTip(ev.clientX, ev.clientY, [feat.name || feat.type, feat.start + "–" + feat.end]);
           },
           onMouseLeave: hideTip,
         })
       );
-      if (sweep > 0.04) {
-        nodes.push(
-          e(
-            "text",
-            {
-              key: "ref-l-" + feat.id,
-              x: cx + size * 0.47 * Math.cos(mid),
-              y: cy + size * 0.47 * Math.sin(mid),
-              textAnchor: "middle",
-              dominantBaseline: "middle",
-              fontSize: 10,
-              fill: "#0f172a",
-            },
-            String(feat.name || feat.type).slice(0, 18)
-          )
-        );
-      }
     });
 
-    (opts.primers || []).forEach(function (feat) {
-      const plus = feat.strand !== "-";
-      const r0 = plus ? rPlus + 8 : rMinus - 16;
-      const r1 = plus ? rPlus + 20 : rMinus - 4;
-      const midPos = (feat.start + feat.end) / 2 + 0.5;
-      const a = angleAt(midPos, seqLen);
-      const x0 = cx + r0 * Math.cos(a);
-      const y0 = cy + r0 * Math.sin(a);
-      const x1 = cx + r1 * Math.cos(a);
-      const y1 = cy + r1 * Math.sin(a);
-      const hit = opts.highlightPrimerNames && opts.highlightPrimerNames.has(feat.name);
-      const color = hit ? "#b45309" : "#f59e0b";
-      const pointSign = plus ? 1 : -1;
+    function drawStrand(spec, geom) {
+      const drawn = arcPathDirected(cx, cy, spec.r, geom.aStart, geom.draw, geom.clockwise);
+      if (!drawn.d) return;
+      nodes.push(
+        e("path", {
+          key: spec.key + "-arc",
+          d: drawn.d,
+          fill: "none",
+          stroke: spec.color,
+          strokeWidth: 8,
+          strokeLinecap: "butt",
+        })
+      );
+      nodes.push(
+        e("polygon", {
+          key: spec.key + "-arr",
+          points: arrowPoints(cx, cy, spec.r, geom.aEnd, geom.clockwise ? 1 : -1, 7),
+          fill: spec.color,
+        })
+      );
+    }
+    if (!plusCover.invalid) drawStrand({ key: "plus", color: "#1d4ed8", r: rPlus }, plusGeom);
+    if (!minusCover.invalid) drawStrand({ key: "minus", color: "#be123c", r: rMinus }, minusGeom);
+
+    const minLabelPx = 54;
+    const minBp = Math.max(
+      1,
+      Math.ceil((minLabelPx / Math.max(rCoord, 40) / (2 * Math.PI)) * seqLen)
+    );
+    const pow10 = Math.pow(10, Math.floor(Math.log10(minBp)));
+    const mult = minBp / pow10;
+    const nice = mult <= 1 ? 1 : mult <= 2 ? 2 : mult <= 5 ? 5 : 10;
+    const step = Math.max(1, nice * pow10);
+    const ticks = [1];
+    for (let p = step; p < seqLen; p += step) ticks.push(p);
+    const minorStep = Math.max(1, Math.round(step / 5));
+    if (minorStep < step) {
+      for (let p = minorStep; p < seqLen; p += minorStep) {
+        if (p % step === 0) continue;
+        const a = angleAt(p, seqLen);
+        nodes.push(
+          e("line", {
+            key: "cm" + p,
+            x1: cx + (rCoord - 4) * Math.cos(a),
+            y1: cy + (rCoord - 4) * Math.sin(a),
+            x2: cx + (rCoord + 3) * Math.cos(a),
+            y2: cy + (rCoord + 3) * Math.sin(a),
+            stroke: "#cbd5e1",
+          })
+        );
+      }
+    }
+    ticks.forEach(function (p) {
+      const a = angleAt(p, seqLen);
+      // Позиция длины совпадает с позицией 1 — вторую подпись не ставим.
+      if (p !== 1 && angDist(a, angleAt(1, seqLen)) < 0.08) return;
       nodes.push(
         e("line", {
-          key: "pr-" + feat.id,
-          x1: x0,
-          y1: y0,
-          x2: x1,
-          y2: y1,
+          key: "ct" + p,
+          x1: cx + (rCoord - 8) * Math.cos(a),
+          y1: cy + (rCoord - 8) * Math.sin(a),
+          x2: cx + (rCoord + 8) * Math.cos(a),
+          y2: cy + (rCoord + 8) * Math.sin(a),
+          stroke: "#64748b",
+        })
+      );
+      nodes.push(
+        haloText("ctl" + p, cx + rCoord * Math.cos(a), cy + rCoord * Math.sin(a), String(p), {
+          fontSize: 10,
+          fill: "#334155",
+          fontWeight: 600,
+        })
+      );
+    });
+
+    function drawPrimer(it, radius) {
+      const color = it.plus ? (it.hit ? "#c2410c" : "#d97706") : it.hit ? "#9f1239" : "#e11d48";
+      const drawn = arcPathDirected(cx, cy, radius, it.start, it.sweep, true);
+      const tip = it.plus ? it.start + it.sweep : it.start;
+      const tipSign = it.plus ? 1 : -1;
+      nodes.push(
+        e("path", {
+          key: "pr-" + it.feat.id,
+          d: drawn.d,
+          fill: "none",
           stroke: color,
-          strokeWidth: hit ? 4 : 2.5,
+          strokeWidth: it.hit ? 4 : 2.5,
+          strokeLinecap: "butt",
           onMouseEnter: function (ev) {
             showTip(ev.clientX, ev.clientY, [
-              feat.name || "primer",
-              feat.start + "–" + feat.end + " (" + (feat.strand || ".") + ")",
+              it.name,
+              it.feat.start + "–" + it.feat.end + " (" + (it.feat.strand || ".") + ")",
             ]);
           },
           onMouseMove: function (ev) {
             showTip(ev.clientX, ev.clientY, [
-              feat.name || "primer",
-              feat.start + "–" + feat.end + " (" + (feat.strand || ".") + ")",
+              it.name,
+              it.feat.start + "–" + it.feat.end + " (" + (it.feat.strand || ".") + ")",
             ]);
           },
           onMouseLeave: hideTip,
         }),
         e("polygon", {
-          key: "pr-a-" + feat.id,
-          points: arrowPoints(cx, cy, plus ? r1 : r0, a, pointSign, hit ? 6 : 4),
+          key: "pr-a-" + it.feat.id,
+          points: arrowPoints(cx, cy, radius, tip, tipSign, it.hit ? 6 : 4.5),
           fill: color,
           style: { pointerEvents: "none" },
         })
       );
+      it.anchorR = radius;
+      it.color = color;
+    }
+    plusPrimers.forEach(function (it) {
+      drawPrimer(it, rPlusPrimer + it.lane * laneStep);
+    });
+    minusPrimers.forEach(function (it) {
+      drawPrimer(it, rMinusPrimer + it.lane * laneStep);
     });
 
-    const plusCover = strandCover(ends.plus5, ends.plus3, seqLen, 1, true);
-    const minusCover = strandCover(ends.minus5, ends.minus3, seqLen, -1, true);
-    const gapLabel = function (cover) {
+    const sidePad = 16;
+    const stacked = stackSideLabels(primers, cy, sidePad, svgH - sidePad);
+    function emitLabels(list, side) {
+      list.forEach(function (it) {
+        const x = side === "right" ? cx + rOuter + 12 : cx - rOuter - 12;
+        const anchorX = cx + it.anchorR * Math.cos(it.mid);
+        const anchorY = cy + it.anchorR * Math.sin(it.mid);
+        const elbowX = side === "right" ? cx + rOuter + 2 : cx - rOuter - 2;
+        nodes.push(
+          e("polyline", {
+            key: "ld-" + it.feat.id,
+            points: [anchorX, anchorY, elbowX, it.labelY, x, it.labelY]
+              .map(function (n, i, arr) {
+                if (i % 2 === 1) return arr[i - 1].toFixed(1) + "," + n.toFixed(1);
+                return null;
+              })
+              .filter(Boolean)
+              .join(" "),
+            fill: "none",
+            stroke: it.color,
+            strokeWidth: 0.8,
+            opacity: 0.7,
+          }),
+          haloText("pn-" + it.feat.id, x, it.labelY, it.name, {
+            textAnchor: side === "right" ? "start" : "end",
+            fontSize: 11,
+            fill: it.color,
+            fontWeight: it.hit ? 700 : 500,
+          })
+        );
+      });
+    }
+    emitLabels(stacked.left, "left");
+    emitLabels(stacked.right, "right");
+
+    const gapText = function (cover) {
       if (cover.invalid) return "—";
-      const n = Math.max(0, seqLen - coveredBp(cover.segments));
-      return n === 0 ? "зазор у концов" : n + " п.н.";
+      return Math.max(0, seqLen - coveredBp(cover.segments)) + " п.н.";
     };
-    nodes.push(
-      e(
-        "text",
-        { key: "c1", x: cx, y: cy - 8, textAnchor: "middle", fontSize: 13, fill: "#0f172a", fontWeight: 700 },
-        opts.title || "кольцевой геном"
-      ),
-      e(
-        "text",
-        { key: "c2", x: cx, y: cy + 10, textAnchor: "middle", fontSize: 11, fill: "#475569" },
-        seqLen + " п.н."
-      ),
-      e(
-        "text",
-        { key: "c3", x: cx, y: cy + 26, textAnchor: "middle", fontSize: 10, fill: "#1d4ed8" },
-        "+ разрыв " + gapLabel(plusCover)
-      ),
-      e(
-        "text",
-        { key: "c4", x: cx, y: cy + 40, textAnchor: "middle", fontSize: 10, fill: "#be123c" },
-        "− разрыв " + gapLabel(minusCover)
-      )
-    );
+    endMarks.forEach(function (mark) {
+      const x = cx + mark.r * Math.cos(mark.ang);
+      const y = cy + mark.r * Math.sin(mark.ang);
+      let deg = (mark.ang * 180) / Math.PI + 90;
+      if (Math.sin(mark.ang) > 0) deg += 180;
+      nodes.push(
+        haloText(mark.key, x, y, mark.text, {
+          fontSize: 11,
+          fill: mark.color,
+          fontWeight: 700,
+          transform: "rotate(" + deg.toFixed(2) + " " + x.toFixed(2) + " " + y.toFixed(2) + ")",
+        })
+      );
+    });
+    if (rRefInner >= 60) {
+      nodes.push(
+        haloText("c1", cx, cy - 22, opts.title || "кольцевой геном", { fontSize: 12, fontWeight: 700 }),
+        haloText("c2", cx, cy - 4, seqLen + " п.н.", { fontSize: 11, fill: "#475569" }),
+        haloText("c3", cx, cy + 14, "+ разрыв " + gapText(plusCover), { fontSize: 10, fill: "#1d4ed8" }),
+        haloText("c4", cx, cy + 30, "− разрыв " + gapText(minusCover), { fontSize: 10, fill: "#be123c" })
+      );
+    }
 
     return e(
       "svg",
       {
         key: "circular-svg",
         width: "100%",
-        viewBox: "0 0 " + size + " " + (size + 16),
+        viewBox: "0 0 " + svgW + " " + svgH,
         className: "annomap-svg annomap-circular-svg",
-        style: { width: "100%", maxWidth: size + "px", height: "auto", display: "block", margin: "0 auto" },
+        style: { width: "100%", height: "auto", display: "block" },
       },
       nodes
     );
@@ -1341,7 +1537,7 @@
     const layout = React.useMemo(() => {
       const groups = [];
       const schemeBlocks = [];
-      let yCursor = 78;
+      let yCursor = 118;
       // при выборе аннотации продукты поднимаем сразу под референс — но схемы всегда между референсом и остальным
       const order = selectedAnnot
         ? ["ref", "product", "primer"]
@@ -2039,10 +2235,20 @@
     };
 
     const ticks = [];
-    const stepGuess = Math.pow(10, Math.max(0, Math.floor(Math.log10(seqLen)) - 1));
-    const step = stepGuess || 100;
-    for (let p = 1; p <= seqLen; p += step) ticks.push(p);
-    if (ticks[ticks.length - 1] !== seqLen) ticks.push(seqLen);
+    const minTickPx = 56;
+    const minTickBp = Math.max(1, Math.ceil((minTickPx / Math.max(plotW, 80)) * seqLen));
+    const tickPow = Math.pow(10, Math.floor(Math.log10(minTickBp)));
+    const tickMult = minTickBp / tickPow;
+    const tickNice = tickMult <= 1 ? 1 : tickMult <= 2 ? 2 : tickMult <= 5 ? 5 : 10;
+    const step = Math.max(1, tickNice * tickPow);
+    ticks.push(1);
+    for (let p = step; p < seqLen; p += step) ticks.push(p);
+    if (ticks[ticks.length - 1] !== seqLen) {
+      const last = ticks[ticks.length - 1];
+      const px = ((seqLen - last) / seqLen) * plotW;
+      if (px < minTickPx * 0.75) ticks[ticks.length - 1] = seqLen;
+      else ticks.push(seqLen);
+    }
 
     const legendTypes = {};
     (data.features || []).forEach((f) => {
@@ -2057,9 +2263,9 @@
       selectedAnnot && layout.groups.length
         ? e("rect", {
             x: xOf(selectedAnnot.start),
-            y: 72,
+            y: 114,
             width: wOf(selectedAnnot.start, selectedAnnot.end),
-            height: Math.max(40, svgH - 88),
+            height: Math.max(40, svgH - 122),
             fill: "rgba(37, 99, 235, 0.14)",
             stroke: "rgba(37, 99, 235, 0.35)",
             strokeWidth: 1,
@@ -2142,14 +2348,14 @@
           "span",
           { style: { color: "#64748b" } },
           plusCover.invalid
-            ? "плюс-цепь: для линейной формы 5′ должен быть левее 3′"
+            ? "у плюс-цепи 5′ и 3′ должны различаться"
             : "разрыв ＋ " + Math.max(0, seqLen - coveredBp(plusCover.segments)) + " п.н."
         ),
         e(
           "span",
           { style: { color: "#64748b" } },
           minusCover.invalid
-            ? "минус-цепь: для линейной формы 5′ должен быть правее 3′"
+            ? "у минус-цепи 5′ и 3′ должны различаться"
             : "разрыв − " + Math.max(0, seqLen - coveredBp(minusCover.segments)) + " п.н."
         )
       ),
@@ -2629,7 +2835,7 @@
       e(
         "p",
         { className: "annomap-hint" },
-        "Нити ДНК рисуются от 5′ к 3′. Между концами каждой нити остаётся разрыв: на линейной карте это непокрытый участок, на кольце — ещё и видимый зазор, если концы почти смыкаются. Отметьте продукты галочками и нажмите «Создать схему ПЦР». Схемы сохраняются вместе с прогоном."
+        "Нить идёт от своего 5′ к 3′. Если 3′ меньше 5′ у плюс-цепи (или 5′ меньше 3′ у минус-цепи), участок проходит через стык последней и первой координаты — там разрыва нет. Разрыв только между заданными концами; прежние концы 1 и конец последовательности больше не отмечаются. Названия праймеров вынесены по сторонам кольца, стрелка показывает направление. Отметьте продукты и сохраните схему ПЦР вместе с прогоном."
       )
     );
   }
