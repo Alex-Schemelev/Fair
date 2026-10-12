@@ -70,13 +70,17 @@
       .annomap-round-box { border:1px solid #e2e8f0; border-radius:8px; padding:8px; margin-bottom:8px; background:#f8fafc; }
       .annomap-scheme-list { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0; }
       .annomap-scheme-chip { font-size:12px; padding:4px 8px; border-radius:999px; background:#e0f2fe; color:#075985; border:1px solid #7dd3fc; }
+      .annomap-ends { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; margin:0 0 10px; font-size:13px; color:#334155; }
+      .annomap-ends input[type="number"] { width:6.5em; margin-left:4px; background:#fff; border:1px solid #cbd5e1; border-radius:6px; padding:3px 6px; color:#0f172a; }
+      .annomap-end-group { display:inline-flex; gap:6px; align-items:center; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:4px 8px; }
+      .annomap-circular { margin:0 0 12px; background:#fff; border:1px solid #cbd5e1; border-radius:8px; padding:8px; }
     </style>
   </head>
   <body>
     <div id="root"></div>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="/annotation_map.js?v=11"></script>
+    <script src="/annotation_map.js?v=12"></script>
     <script>
       const e = React.createElement;
 
@@ -123,6 +127,13 @@
         const [annotationMap, setAnnotationMap] = React.useState({ length: 0, features: [] });
         const [pcrSchemes, setPcrSchemes] = React.useState([]);
         const [laneMaps, setLaneMaps] = React.useState({ ref: {}, primer: {}, product: {} });
+        const [genomeView, setGenomeView] = React.useState({
+          circular: null,
+          plus5: "",
+          plus3: "",
+          minus5: "",
+          minus3: ""
+        });
         const [loading, setLoading] = React.useState(false);
         const [filterInfo, setFilterInfo] = React.useState(null);
 
@@ -160,6 +171,17 @@
           setAnnotationMap(data.annotation_map || { length: 0, features: [] });
           setPcrSchemes(data.pcr_schemes || []);
           setLaneMaps(data.lane_maps || { ref: {}, primer: {}, product: {} });
+          if (data.genome_view && typeof data.genome_view === "object" && Object.keys(data.genome_view).length) {
+            setGenomeView(data.genome_view);
+          } else {
+            setGenomeView({
+              circular: (data.annotation_map && data.annotation_map.topology) === "circular",
+              plus5: "",
+              plus3: "",
+              minus5: "",
+              minus3: ""
+            });
+          }
           if (data.products_before_filter !== undefined) {
             setFilterInfo({
               before: data.products_before_filter,
@@ -189,7 +211,7 @@
             await fetch(`/api/run/${runId}/update_session`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ pcr_schemes: pcrSchemes, lane_maps: laneMaps })
+              body: JSON.stringify({ pcr_schemes: pcrSchemes, lane_maps: laneMaps, genome_view: genomeView })
             });
           } catch (err) {
             console.error(err);
@@ -203,11 +225,11 @@
             fetch(`/api/run/${runId}/update_session`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ lane_maps: laneMaps, pcr_schemes: pcrSchemes })
+              body: JSON.stringify({ lane_maps: laneMaps, pcr_schemes: pcrSchemes, genome_view: genomeView })
             }).catch(() => {});
           }, 600);
           return () => clearTimeout(timer);
-        }, [laneMaps, pcrSchemes, runId]);
+        }, [laneMaps, pcrSchemes, genomeView, runId]);
 
         const classifyRunFile = (fn) => {
           const name = String(fn || "");
@@ -835,7 +857,7 @@
                 e("h2", null, "Визуализация продуктов"),
                 renderTabFileLinks("map"),
                 e("p", { style:{ color:"#9ca3af", marginTop:0 } },
-                  "Референсные аннотации, праймеры (стрелки) и возможные ПЦР‑продукты. Наведите курсор для деталей, блоки можно перетаскивать."
+                  "Референсные аннотации, праймеры и ПЦР‑продукты. Можно включить кольцевую форму генома и задать координаты 5′ и 3′ концов плюс- и минус-цепи: между концами каждой нити остаётся разрыв."
                 ),
                 (window.AnnotationMapView
                   ? e(window.AnnotationMapView, {
@@ -846,6 +868,8 @@
                       onSchemesChange: setPcrSchemes,
                       laneMaps: laneMaps,
                       onLaneMapsChange: setLaneMaps,
+                      genomeView: genomeView,
+                      onGenomeViewChange: setGenomeView,
                       runId: runId
                     })
                   : e("p", null, "Компонент схемы не загружен (annotation_map.js)."))

@@ -198,6 +198,147 @@
     return { packed: packed, laneCount: Math.max(1, items.length) };
   }
 
+  function clampCoord(raw, seqLen, fallback) {
+    if (raw === "" || raw === null || raw === undefined) return fallback;
+    const n = Math.round(Number(raw));
+    if (!Number.isFinite(n)) return fallback;
+    return Math.min(seqLen, Math.max(1, n));
+  }
+
+  function resolveStrandEnds(view, seqLen) {
+    const src = view || {};
+    return {
+      circular: !!src.circular,
+      plus5: clampCoord(src.plus5, seqLen, 1),
+      plus3: clampCoord(src.plus3, seqLen, seqLen),
+      minus5: clampCoord(src.minus5, seqLen, seqLen),
+      minus3: clampCoord(src.minus3, seqLen, 1),
+    };
+  }
+
+  /**
+   * Участки нити от 5' к 3'.
+   * direction > 0 — плюс-цепь (координата растёт), direction < 0 — минус-цепь.
+   * На кольце допускается переход через начало координат. Разрыв — всё, что не покрыто.
+   */
+  function strandCover(end5, end3, seqLen, direction, circular) {
+    if (end5 === end3) {
+      return { segments: [], invalid: true, end5: end5, end3: end3, wraps: false };
+    }
+    if (!circular) {
+      if (direction > 0 && end5 > end3) {
+        return { segments: [], invalid: true, end5: end5, end3: end3, wraps: false };
+      }
+      if (direction < 0 && end5 < end3) {
+        return { segments: [], invalid: true, end5: end5, end3: end3, wraps: false };
+      }
+    }
+    if (direction > 0) {
+      if (end5 < end3) {
+        return { segments: [[end5, end3]], invalid: false, end5: end5, end3: end3, wraps: false };
+      }
+      return {
+        segments: [[end5, seqLen], [1, end3]],
+        invalid: false,
+        end5: end5,
+        end3: end3,
+        wraps: true,
+      };
+    }
+    if (end5 > end3) {
+      return { segments: [[end3, end5]], invalid: false, end5: end5, end3: end3, wraps: false };
+    }
+    return {
+      segments: [[1, end5], [end3, seqLen]],
+      invalid: false,
+      end5: end5,
+      end3: end3,
+      wraps: true,
+    };
+  }
+
+  function coveredBp(segments) {
+    return (segments || []).reduce(function (sum, seg) {
+      return sum + (seg[1] - seg[0] + 1);
+    }, 0);
+  }
+
+  // На кольце концы, которые почти смыкаются, раздвигаются, чтобы разрыв был виден.
+  function circularInsets(segments, seqLen) {
+    const pads = (segments || []).map(function () {
+      return { lo: 0, hi: 0 };
+    });
+    if (!segments || !segments.length) return pads;
+    const minBp = Math.max(2, Math.round(seqLen * 0.012));
+    const sorted = segments
+      .map(function (seg, i) {
+        return { lo: seg[0], hi: seg[1], i: i };
+      })
+      .sort(function (a, b) {
+        return a.lo - b.lo;
+      });
+    for (let k = 0; k < sorted.length; k++) {
+      const cur = sorted[k];
+      const nxt = sorted[(k + 1) % sorted.length];
+      const gapBp =
+        k < sorted.length - 1 ? nxt.lo - cur.hi - 1 : seqLen - cur.hi + (nxt.lo - 1);
+      if (gapBp >= minBp) continue;
+      const need = minBp - Math.max(0, gapBp);
+      const curRoom = Math.max(0, cur.hi - cur.lo - pads[cur.i].lo - pads[cur.i].hi);
+      const nxtRoom = Math.max(0, nxt.hi - nxt.lo - pads[nxt.i].lo - pads[nxt.i].hi);
+      const takeCur = Math.min(curRoom, need / 2);
+      const takeNxt = Math.min(nxtRoom, need - takeCur);
+      pads[cur.i].hi += takeCur;
+      pads[nxt.i].lo += takeNxt;
+    }
+    return pads;
+  }
+
+  function angleAt(pos, seqLen) {
+    return -Math.PI / 2 + ((pos - 1) / seqLen) * 2 * Math.PI;
+  }
+
+  function arcPath(cx, cy, r, a0, a1) {
+    let sweep = a1 - a0;
+    while (sweep <= 0) sweep += Math.PI * 2;
+    while (sweep > Math.PI * 2) sweep -= Math.PI * 2;
+    if (sweep < 0.004) return "";
+    const large = sweep > Math.PI ? 1 : 0;
+    const x0 = cx + r * Math.cos(a0);
+    const y0 = cy + r * Math.sin(a0);
+    const x1 = cx + r * Math.cos(a1);
+    const y1 = cy + r * Math.sin(a1);
+    return (
+      "M " +
+      x0.toFixed(2) +
+      " " +
+      y0.toFixed(2) +
+      " A " +
+      r.toFixed(2) +
+      " " +
+      r.toFixed(2) +
+      " 0 " +
+      large +
+      " 1 " +
+      x1.toFixed(2) +
+      " " +
+      y1.toFixed(2)
+    );
+  }
+
+  function arrowPoints(cx, cy, r, angle, pointSign, size) {
+    const tipA = angle;
+    const backA = angle - pointSign * 0.22;
+    const tip = [cx + r * Math.cos(tipA), cy + r * Math.sin(tipA)];
+    const s1 = [cx + (r + size) * Math.cos(backA), cy + (r + size) * Math.sin(backA)];
+    const s2 = [cx + (r - size) * Math.cos(backA), cy + (r - size) * Math.sin(backA)];
+    return [tip, s1, s2]
+      .map(function (p) {
+        return p[0].toFixed(1) + "," + p[1].toFixed(1);
+      })
+      .join(" ");
+  }
+
   const SCHEME_STATUS = {
     untested: {
       id: "untested",
@@ -614,6 +755,395 @@
     return solutions;
   }
 
+  function buildLinearStrands(opts) {
+    const seqLen = opts.seqLen;
+    const leftPad = opts.leftPad;
+    const plotW = opts.plotW;
+    const xStart = function (pos) {
+      return leftPad + ((pos - 1) / seqLen) * plotW;
+    };
+    const xEnd = function (pos) {
+      return leftPad + (pos / seqLen) * plotW;
+    };
+    const specs = [
+      {
+        key: "plus",
+        caption: "+",
+        color: "#1d4ed8",
+        y: 34,
+        labelY: 30,
+        dir: 1,
+        end5: opts.ends.plus5,
+        end3: opts.ends.plus3,
+      },
+      {
+        key: "minus",
+        caption: "−",
+        color: "#be123c",
+        y: 52,
+        labelY: 64,
+        dir: -1,
+        end5: opts.ends.minus5,
+        end3: opts.ends.minus3,
+      },
+    ];
+    const nodes = [
+      e("text", { key: "strand-axis-title", x: 8, y: 22, fontSize: 10, fill: "#64748b" }, "нити"),
+    ];
+    specs.forEach(function (spec) {
+      const cover = strandCover(spec.end5, spec.end3, seqLen, spec.dir, opts.circular);
+      nodes.push(
+        e(
+          "text",
+          {
+            key: spec.key + "-cap",
+            x: 8,
+            y: spec.y + 4,
+            fontSize: 12,
+            fill: spec.color,
+            fontWeight: 700,
+          },
+          spec.caption
+        )
+      );
+      if (cover.invalid || !cover.segments.length) {
+        nodes.push(
+          e(
+            "text",
+            { key: spec.key + "-bad", x: leftPad, y: spec.y + 4, fontSize: 11, fill: "#b91c1c" },
+            "концы не заданы для этой формы генома"
+          )
+        );
+        return;
+      }
+      cover.segments.forEach(function (seg, idx) {
+        const x1 = xStart(seg[0]);
+        const x2 = xEnd(seg[1]);
+        nodes.push(
+          e("line", {
+            key: spec.key + "-seg-" + idx,
+            x1: x1,
+            y1: spec.y,
+            x2: x2,
+            y2: spec.y,
+            stroke: spec.color,
+            strokeWidth: 5,
+            strokeLinecap: "butt",
+          })
+        );
+      });
+      const threeOnRight = spec.dir > 0;
+      const x5 = xStart(spec.end5);
+      const x3 = threeOnRight ? xEnd(spec.end3) : xStart(spec.end3);
+      const gap = Math.abs(x5 - x3);
+      const shift = gap < 46 ? 18 : 0;
+      const anchor5 = spec.dir > 0 ? "start" : "end";
+      const anchor3 = spec.dir > 0 ? "end" : "start";
+      nodes.push(
+        e(
+          "text",
+          {
+            key: spec.key + "-l5",
+            x: x5 + (spec.dir > 0 ? -shift : shift),
+            y: spec.labelY,
+            textAnchor: anchor5,
+            fontSize: 10,
+            fill: spec.color,
+            fontWeight: 700,
+          },
+          "5′ " + spec.end5
+        ),
+        e(
+          "text",
+          {
+            key: spec.key + "-l3",
+            x: x3 + (spec.dir > 0 ? shift : -shift),
+            y: spec.labelY,
+            textAnchor: anchor3,
+            fontSize: 10,
+            fill: spec.color,
+            fontWeight: 700,
+          },
+          "3′ " + spec.end3
+        )
+      );
+      const ah = 7;
+      if (spec.dir > 0) {
+        nodes.push(
+          e("polygon", {
+            key: spec.key + "-arrow",
+            points: [x3, spec.y, x3 - ah, spec.y - 5, x3 - ah, spec.y + 5].join(" "),
+            fill: spec.color,
+          })
+        );
+      } else {
+        nodes.push(
+          e("polygon", {
+            key: spec.key + "-arrow",
+            points: [x3, spec.y, x3 + ah, spec.y - 5, x3 + ah, spec.y + 5].join(" "),
+            fill: spec.color,
+          })
+        );
+      }
+    });
+    return nodes;
+  }
+
+  function buildCircularMap(opts) {
+    const seqLen = opts.seqLen;
+    const ends = opts.ends;
+    const size = Math.max(420, Math.min(680, opts.size || 560));
+    const cx = size / 2;
+    const cy = size / 2 + 8;
+    const rPlus = size * 0.33;
+    const rMinus = size * 0.27;
+    const rTick = size * 0.38;
+    const nodes = [];
+    const showTip = opts.showTip || function () {};
+    const hideTip = opts.hideTip || function () {};
+
+    nodes.push(
+      e("circle", {
+        key: "guide",
+        cx: cx,
+        cy: cy,
+        r: (rPlus + rMinus) / 2,
+        fill: "none",
+        stroke: "#e2e8f0",
+        strokeWidth: 18,
+      })
+    );
+
+    function drawStrand(spec) {
+      const cover = strandCover(spec.end5, spec.end3, seqLen, spec.dir, true);
+      if (cover.invalid || !cover.segments.length) return;
+      const pads = circularInsets(cover.segments, seqLen);
+      cover.segments.forEach(function (seg, idx) {
+        const lo = seg[0] + pads[idx].lo;
+        const hi = seg[1] - pads[idx].hi;
+        if (hi < lo) return;
+        const d = arcPath(cx, cy, spec.r, angleAt(lo, seqLen), angleAt(hi + 1, seqLen));
+        if (!d) return;
+        nodes.push(
+          e("path", {
+            key: spec.key + "-arc-" + idx,
+            d: d,
+            fill: "none",
+            stroke: spec.color,
+            strokeWidth: 8,
+            strokeLinecap: "butt",
+          })
+        );
+      });
+      const a5raw = angleAt(spec.end5, seqLen);
+      const a3raw = spec.dir > 0 ? angleAt(spec.end3 + 1, seqLen) : angleAt(spec.end3, seqLen);
+      let delta = a3raw - a5raw;
+      while (delta > Math.PI) delta -= Math.PI * 2;
+      while (delta < -Math.PI) delta += Math.PI * 2;
+      const a5 = Math.abs(delta) < 0.4 ? a5raw - 0.22 : a5raw;
+      const a3 = Math.abs(delta) < 0.4 ? a3raw + 0.22 : a3raw;
+      const labelR = spec.r + (spec.dir > 0 ? 16 : -16);
+      nodes.push(
+        e(
+          "text",
+          {
+            key: spec.key + "-t5",
+            x: cx + labelR * Math.cos(a5),
+            y: cy + labelR * Math.sin(a5),
+            textAnchor: "middle",
+            dominantBaseline: "middle",
+            fontSize: 11,
+            fill: spec.color,
+            fontWeight: 700,
+          },
+          "5′"
+        ),
+        e(
+          "text",
+          {
+            key: spec.key + "-t3",
+            x: cx + labelR * Math.cos(a3),
+            y: cy + labelR * Math.sin(a3),
+            textAnchor: "middle",
+            dominantBaseline: "middle",
+            fontSize: 11,
+            fill: spec.color,
+            fontWeight: 700,
+          },
+          "3′"
+        ),
+        e("polygon", {
+          key: spec.key + "-arr",
+          points: arrowPoints(cx, cy, spec.r, a3raw, spec.dir > 0 ? 1 : -1, 7),
+          fill: spec.color,
+        })
+      );
+    }
+
+    drawStrand({ key: "plus", color: "#1d4ed8", r: rPlus, dir: 1, end5: ends.plus5, end3: ends.plus3 });
+    drawStrand({ key: "minus", color: "#be123c", r: rMinus, dir: -1, end5: ends.minus5, end3: ends.minus3 });
+
+    const stepGuess = Math.pow(10, Math.max(0, Math.floor(Math.log10(seqLen)) - 1));
+    const step = stepGuess || 100;
+    const ticks = [1];
+    for (let p = step; p < seqLen; p += step) ticks.push(p);
+    ticks.forEach(function (p) {
+      const a = angleAt(p, seqLen);
+      nodes.push(
+        e("line", {
+          key: "ct" + p,
+          x1: cx + (rTick - 8) * Math.cos(a),
+          y1: cy + (rTick - 8) * Math.sin(a),
+          x2: cx + rTick * Math.cos(a),
+          y2: cy + rTick * Math.sin(a),
+          stroke: "#94a3b8",
+        }),
+        e(
+          "text",
+          {
+            key: "ctl" + p,
+            x: cx + (rTick + 12) * Math.cos(a),
+            y: cy + (rTick + 12) * Math.sin(a),
+            textAnchor: "middle",
+            dominantBaseline: "middle",
+            fontSize: 10,
+            fill: "#64748b",
+          },
+          String(p)
+        )
+      );
+    });
+
+    (opts.refs || []).forEach(function (feat) {
+      const d = arcPath(cx, cy, size * 0.43, angleAt(feat.start, seqLen), angleAt(feat.end + 1, seqLen));
+      if (!d) return;
+      const mid = angleAt((feat.start + feat.end) / 2 + 0.5, seqLen);
+      const sweep = (feat.end - feat.start + 1) / seqLen;
+      nodes.push(
+        e("path", {
+          key: "ref-" + feat.id,
+          d: d,
+          fill: "none",
+          stroke: colorFor(feat.type),
+          strokeWidth: 6,
+          strokeLinecap: "butt",
+          opacity: 0.85,
+          onMouseEnter: function (ev) {
+            showTip(ev.clientX, ev.clientY, [
+              feat.name || feat.type,
+              feat.start + "–" + feat.end,
+            ]);
+          },
+          onMouseLeave: hideTip,
+        })
+      );
+      if (sweep > 0.04) {
+        nodes.push(
+          e(
+            "text",
+            {
+              key: "ref-l-" + feat.id,
+              x: cx + size * 0.47 * Math.cos(mid),
+              y: cy + size * 0.47 * Math.sin(mid),
+              textAnchor: "middle",
+              dominantBaseline: "middle",
+              fontSize: 10,
+              fill: "#0f172a",
+            },
+            String(feat.name || feat.type).slice(0, 18)
+          )
+        );
+      }
+    });
+
+    (opts.primers || []).forEach(function (feat) {
+      const plus = feat.strand !== "-";
+      const r0 = plus ? rPlus + 8 : rMinus - 16;
+      const r1 = plus ? rPlus + 20 : rMinus - 4;
+      const midPos = (feat.start + feat.end) / 2 + 0.5;
+      const a = angleAt(midPos, seqLen);
+      const x0 = cx + r0 * Math.cos(a);
+      const y0 = cy + r0 * Math.sin(a);
+      const x1 = cx + r1 * Math.cos(a);
+      const y1 = cy + r1 * Math.sin(a);
+      const hit = opts.highlightPrimerNames && opts.highlightPrimerNames.has(feat.name);
+      const color = hit ? "#b45309" : "#f59e0b";
+      const pointSign = plus ? 1 : -1;
+      nodes.push(
+        e("line", {
+          key: "pr-" + feat.id,
+          x1: x0,
+          y1: y0,
+          x2: x1,
+          y2: y1,
+          stroke: color,
+          strokeWidth: hit ? 4 : 2.5,
+          onMouseEnter: function (ev) {
+            showTip(ev.clientX, ev.clientY, [
+              feat.name || "primer",
+              feat.start + "–" + feat.end + " (" + (feat.strand || ".") + ")",
+            ]);
+          },
+          onMouseMove: function (ev) {
+            showTip(ev.clientX, ev.clientY, [
+              feat.name || "primer",
+              feat.start + "–" + feat.end + " (" + (feat.strand || ".") + ")",
+            ]);
+          },
+          onMouseLeave: hideTip,
+        }),
+        e("polygon", {
+          key: "pr-a-" + feat.id,
+          points: arrowPoints(cx, cy, plus ? r1 : r0, a, pointSign, hit ? 6 : 4),
+          fill: color,
+          style: { pointerEvents: "none" },
+        })
+      );
+    });
+
+    const plusCover = strandCover(ends.plus5, ends.plus3, seqLen, 1, true);
+    const minusCover = strandCover(ends.minus5, ends.minus3, seqLen, -1, true);
+    const gapLabel = function (cover) {
+      if (cover.invalid) return "—";
+      const n = Math.max(0, seqLen - coveredBp(cover.segments));
+      return n === 0 ? "зазор у концов" : n + " п.н.";
+    };
+    nodes.push(
+      e(
+        "text",
+        { key: "c1", x: cx, y: cy - 8, textAnchor: "middle", fontSize: 13, fill: "#0f172a", fontWeight: 700 },
+        opts.title || "кольцевой геном"
+      ),
+      e(
+        "text",
+        { key: "c2", x: cx, y: cy + 10, textAnchor: "middle", fontSize: 11, fill: "#475569" },
+        seqLen + " п.н."
+      ),
+      e(
+        "text",
+        { key: "c3", x: cx, y: cy + 26, textAnchor: "middle", fontSize: 10, fill: "#1d4ed8" },
+        "+ разрыв " + gapLabel(plusCover)
+      ),
+      e(
+        "text",
+        { key: "c4", x: cx, y: cy + 40, textAnchor: "middle", fontSize: 10, fill: "#be123c" },
+        "− разрыв " + gapLabel(minusCover)
+      )
+    );
+
+    return e(
+      "svg",
+      {
+        key: "circular-svg",
+        width: "100%",
+        viewBox: "0 0 " + size + " " + (size + 16),
+        className: "annomap-svg annomap-circular-svg",
+        style: { width: "100%", maxWidth: size + "px", height: "auto", display: "block", margin: "0 auto" },
+      },
+      nodes
+    );
+  }
+
   function AnnotationMapView(props) {
     const data = props.data || { length: 0, features: [] };
     const conservation = props.conservation || [];
@@ -621,6 +1151,17 @@
     const schemes = props.schemes || [];
     const onSchemesChange = props.onSchemesChange || (() => {});
     const onLaneMapsChange = props.onLaneMapsChange || null;
+    const onGenomeViewChange = props.onGenomeViewChange || null;
+    const emptyGenome = { circular: false, plus5: "", plus3: "", minus5: "", minus3: "" };
+    const [genomeLocal, setGenomeLocal] = React.useState(
+      props.genomeView && typeof props.genomeView === "object" ? props.genomeView : emptyGenome
+    );
+    const genomeView =
+      props.genomeView && typeof props.genomeView === "object" ? props.genomeView : genomeLocal;
+    const setGenomeView = (next) => {
+      if (onGenomeViewChange) onGenomeViewChange(next);
+      else setGenomeLocal(next);
+    };
     const emptyLanes = { ref: {}, primer: {}, product: {} };
     const [showRef, setShowRef] = React.useState(true);
     const [showPrimers, setShowPrimers] = React.useState(true);
@@ -800,7 +1341,7 @@
     const layout = React.useMemo(() => {
       const groups = [];
       const schemeBlocks = [];
-      let yCursor = 36;
+      let yCursor = 78;
       // при выборе аннотации продукты поднимаем сразу под референс — но схемы всегда между референсом и остальным
       const order = selectedAnnot
         ? ["ref", "product", "primer"]
@@ -987,6 +1528,39 @@
     const schemeLayout = layout;
 
     const seqLen = Math.max(1, Number(data.length) || 1);
+    const circularGenome =
+      genomeView.circular === true || (genomeView.circular == null && data.topology === "circular");
+    const strandEnds = resolveStrandEnds(
+      Object.assign({}, genomeView, { circular: circularGenome }),
+      seqLen
+    );
+    const plusCover = strandCover(strandEnds.plus5, strandEnds.plus3, seqLen, 1, circularGenome);
+    const minusCover = strandCover(strandEnds.minus5, strandEnds.minus3, seqLen, -1, circularGenome);
+    const patchGenome = (partial) => {
+      setGenomeView(Object.assign({}, genomeView, { circular: circularGenome }, partial));
+    };
+    const endInput = (key, label) =>
+      e(
+        "label",
+        { key: key },
+        label,
+        e("input", {
+          type: "number",
+          min: 1,
+          max: seqLen,
+          step: 1,
+          placeholder: String(strandEnds[key]),
+          value:
+            genomeView[key] === "" || genomeView[key] === null || genomeView[key] === undefined
+              ? ""
+              : genomeView[key],
+          onChange: (ev) => {
+            const partial = {};
+            partial[key] = ev.target.value;
+            patchGenome(partial);
+          },
+        })
+      );
     const plotW = plotWidth * zoom;
     const leftPad = 140;
     const rightPad = 24;
@@ -997,7 +1571,7 @@
     const wOf = (start, end) => Math.max(3, ((end - start + 1) / seqLen) * plotW);
 
     const laneFromClientY = (group, clientY) => {
-      const svg = wrapRef.current && wrapRef.current.querySelector("svg");
+      const svg = wrapRef.current && wrapRef.current.querySelector("svg.annomap-linear-svg");
       if (!svg) return 0;
       const rect = svg.getBoundingClientRect();
       // учитываем viewBox масштабирование
@@ -1483,9 +2057,9 @@
       selectedAnnot && layout.groups.length
         ? e("rect", {
             x: xOf(selectedAnnot.start),
-            y: 28,
+            y: 72,
             width: wOf(selectedAnnot.start, selectedAnnot.end),
-            height: Math.max(40, svgH - 40),
+            height: Math.max(40, svgH - 88),
             fill: "rgba(37, 99, 235, 0.14)",
             stroke: "rgba(37, 99, 235, 0.35)",
             strokeWidth: 1,
@@ -1533,6 +2107,51 @@
           disabled: selectedCount === 0,
           style: selectedCount === 0 ? { opacity: 0.5, cursor: "not-allowed" } : null,
         }, "Создать схему ПЦР" + (selectedCount ? " (" + selectedCount + ")" : ""))
+      ),
+      e(
+        "div",
+        { className: "annomap-ends" },
+        e(
+          "label",
+          null,
+          e("input", {
+            type: "checkbox",
+            checked: circularGenome,
+            onChange: (ev) => patchGenome({ circular: ev.target.checked }),
+          }),
+          " Кольцевой геном"
+        ),
+        e("span", { className: "annomap-end-group" }, "＋ ДНК", endInput("plus5", "5′"), endInput("plus3", "3′")),
+        e("span", { className: "annomap-end-group" }, "− ДНК", endInput("minus5", "5′"), endInput("minus3", "3′")),
+        e(
+          "button",
+          {
+            type: "button",
+            className: "btn-secondary",
+            onClick: () =>
+              patchGenome({
+                plus5: 1,
+                plus3: seqLen,
+                minus5: seqLen,
+                minus3: 1,
+              }),
+          },
+          "Концы по умолчанию"
+        ),
+        e(
+          "span",
+          { style: { color: "#64748b" } },
+          plusCover.invalid
+            ? "плюс-цепь: для линейной формы 5′ должен быть левее 3′"
+            : "разрыв ＋ " + Math.max(0, seqLen - coveredBp(plusCover.segments)) + " п.н."
+        ),
+        e(
+          "span",
+          { style: { color: "#64748b" } },
+          minusCover.invalid
+            ? "минус-цепь: для линейной формы 5′ должен быть правее 3′"
+            : "разрыв − " + Math.max(0, seqLen - coveredBp(minusCover.segments)) + " п.н."
+        )
       ),
       allProducts.length > 0 &&
         e(
@@ -1653,6 +2272,23 @@
           )
         )
       ),
+      circularGenome
+        ? e(
+            "div",
+            { className: "annomap-circular" },
+            buildCircularMap({
+              seqLen: seqLen,
+              size: Math.max(420, Math.min(680, plotWidth + 80)),
+              ends: strandEnds,
+              title: data.id || "кольцевой геном",
+              refs: showRef ? (data.features || []).filter((f) => f.category === "ref") : [],
+              primers: showPrimers ? (data.features || []).filter((f) => f.category === "primer") : [],
+              highlightPrimerNames: highlightPrimerNames,
+              showTip: (x, y, lines) => setTooltip({ x: x + 12, y: y + 12, lines: lines }),
+              hideTip: () => setTooltip(null),
+            })
+          )
+        : null,
       e(
         "div",
         { className: "annomap-scroll" },
@@ -1662,7 +2298,7 @@
             width: "100%",
             viewBox: "0 0 " + svgW + " " + svgH,
             preserveAspectRatio: "xMinYMin meet",
-            className: "annomap-svg",
+            className: "annomap-svg annomap-linear-svg",
             style: { width: "100%", height: "auto", minHeight: Math.min(svgH, 480) + "px" },
             onClick: () => {},
           },
@@ -1683,6 +2319,13 @@
               e("text", { x: xOf(p), y: 12, textAnchor: "middle", fontSize: 10, fill: "#64748b" }, String(p))
             )
           ),
+          buildLinearStrands({
+            seqLen: seqLen,
+            leftPad: leftPad,
+            plotW: plotW,
+            circular: circularGenome,
+            ends: strandEnds,
+          }),
           layout.groups.map((group) =>
             e(
               "g",
@@ -1986,7 +2629,7 @@
       e(
         "p",
         { className: "annomap-hint" },
-        "Отметьте продукты галочками и нажмите «Создать схему ПЦР». Продукты остаются на общей карте и могут входить в несколько схем. Схемы сохраняются вместе с прогоном (кнопка «Сохранить прогон»)."
+        "Нити ДНК рисуются от 5′ к 3′. Между концами каждой нити остаётся разрыв: на линейной карте это непокрытый участок, на кольце — ещё и видимый зазор, если концы почти смыкаются. Отметьте продукты галочками и нажмите «Создать схему ПЦР». Схемы сохраняются вместе с прогоном."
       )
     );
   }

@@ -588,6 +588,24 @@ def run_pcr():
     return jsonify(response_payload)
 
 
+def clean_genome_view(value):
+    """Оставить только переключатели формы генома и координаты концов нитей."""
+    if not isinstance(value, dict):
+        return {}
+    out = {"circular": bool(value.get("circular"))}
+    for key in ("plus5", "plus3", "minus5", "minus3"):
+        raw = value.get(key)
+        if raw is None or raw == "":
+            continue
+        try:
+            n = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if n > 0:
+            out[key] = n
+    return out
+
+
 @app.post("/api/run/<run_id>/update_session")
 def update_session(run_id):
     """Обновить session.json (например, схемы ПЦР), не пересчитывая пайплайн."""
@@ -609,6 +627,8 @@ def update_session(run_id):
     for key in ("lane_maps",):
         if key in payload:
             session[key] = payload.get(key)
+    if "genome_view" in payload:
+        session["genome_view"] = clean_genome_view(payload.get("genome_view"))
     session["run_id"] = run_id
     session = slim_session_payload(session)
     try:
@@ -621,6 +641,7 @@ def update_session(run_id):
         "run_id": run_id,
         "pcr_schemes": session.get("pcr_schemes", []),
         "lane_maps": session.get("lane_maps", {}),
+        "genome_view": session.get("genome_view") or {},
     })
 
 

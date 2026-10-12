@@ -222,8 +222,15 @@ def extract_annotation_map(gb_path, products=None, bindings=None):
                 "info": info,
             })
 
+    topology = "linear"
+    annotations = getattr(record, "annotations", None) or {}
+    raw_topology = str(annotations.get("topology") or "").strip().lower()
+    if raw_topology in ("circular", "linear"):
+        topology = raw_topology
+
     return {
         "length": length,
         "id": getattr(record, "id", "reference"),
+        "topology": topology,
         "features": features,
     }
